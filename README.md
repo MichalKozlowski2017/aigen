@@ -35,6 +35,16 @@ npm run dev
 
 Otwórz [http://localhost:3000](http://localhost:3000) — pulpit pokazuje stan ComfyUI (online/offline).
 
+## Vercel + Cloudflare Tunnel + Legion
+
+Panel możesz hostować na **Vercel**, a **ComfyUI** trzymać na stacjonarnym PC (**Legion**, RTX) — połączenie przez **Cloudflare Tunnel** (HTTPS do `127.0.0.1:8188`, bez otwierania portu w routerze).
+
+1. Na Legionie: ComfyUI na `127.0.0.1:8188` + tunel `cloudflared` wskazujący na ten adres.
+2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`.
+3. Deploy — zdalny dostęp do panelu; generacja działa, gdy Legion, tunel i ComfyUI są online.
+
+Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
+
 ## Zmienne środowiskowe
 
 | Zmienna | Opis |
