@@ -1,0 +1,68 @@
+[
+  {
+    "id": "sdxl-base",
+    "name": "SDXL Base 1.0",
+    "type": "checkpoint",
+    "filename": "sd_xl_base_1.0.safetensors",
+    "targetSubdir": "checkpoints",
+    "downloadUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+    "sizeHint": "~6.9 GB",
+    "notes": "Domyślny workflow obrazu w Studio. Komfortowo na 16 GB VRAM przy 1024².",
+    "vramHintGb": 8
+  },
+  {
+    "id": "sdxl-refiner",
+    "name": "SDXL Refiner 1.0",
+    "type": "checkpoint",
+    "filename": "sd_xl_refiner_1.0.safetensors",
+    "targetSubdir": "checkpoints",
+    "downloadUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+    "sizeHint": "~6.1 GB",
+    "notes": "Opcjonalny refiner — nie wymagany przez domyślny workflow Studio.",
+    "vramHintGb": 8
+  },
+  {
+    "id": "sd15-pruned",
+    "name": "SD 1.5 (pruned emaonly)",
+    "type": "checkpoint",
+    "filename": "v1-5-pruned-emaonly.safetensors",
+    "targetSubdir": "checkpoints",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/stable-diffusion-v1-5-archive/resolve/main/v1-5-pruned-emaonly.safetensors",
+    "sizeHint": "~4.0 GB",
+    "notes": "Lżejszy checkpoint; zmień model w formularzu Generuj. Workflow SDXL wymaga SDXL.",
+    "vramHintGb": 4
+  },
+  {
+    "id": "vae-sdxl",
+    "name": "SDXL VAE (fp16 fix)",
+    "type": "vae",
+    "filename": "sdxl_vae.safetensors",
+    "targetSubdir": "vae",
+    "downloadUrl": "https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors",
+    "sizeHint": "~320 MB",
+    "notes": "Opcjonalny VAE — domyślny workflow używa VAE z checkpointu.",
+    "vramHintGb": 1
+  },
+  {
+    "id": "svd-xt",
+    "name": "Stable Video Diffusion XT",
+    "type": "checkpoint",
+    "filename": "svd_xt.safetensors",
+    "targetSubdir": "checkpoints",
+    "downloadUrl": "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors",
+    "sizeHint": "~9.5 GB",
+    "notes": "Wideo (img2vid). Na 16 GB trzymaj 512px i krótkie klipy. Wymaga też custom node VHS (Video Helper Suite).",
+    "vramHintGb": 12
+  },
+  {
+    "id": "lora-offset-noise",
+    "name": "SDXL Offset Noise LoRA (przykład)",
+    "type": "lora",
+    "filename": "sd_xl_offset_example-lora_1.0.safetensors",
+    "targetSubdir": "loras",
+    "downloadUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_offset_example-lora_1.0.safetensors",
+    "sizeHint": "~23 MB",
+    "notes": "Oficjalny przykład LoRA od Stability — nie podpięty w domyślnym workflow; do ręcznego użycia w ComfyUI.",
+    "vramHintGb": 1
+  }
+]
