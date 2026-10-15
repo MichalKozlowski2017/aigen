@@ -19,7 +19,11 @@ export default function StudioSettingsPage() {
       label: "STUDIO_PASSWORD",
       value: config.passwordRequired ? "ustawione (ukryte)" : "wyłączone — otwarty dostęp lokalny",
     },
-    { label: "Domyślny checkpoint", value: config.defaultCheckpoint },
+    {
+      label: "Domyślny model obrazu",
+      value: config.defaultImageModel,
+    },
+    { label: "Checkpoint SDXL (opcja)", value: config.defaultCheckpoint },
   ];
 
   return (

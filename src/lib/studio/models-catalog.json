@@ -1,5 +1,38 @@
 [
   {
+    "id": "flux2-dev-fp8",
+    "name": "Flux.2 Dev (fp8 mixed)",
+    "type": "unet",
+    "filename": "flux2_dev_fp8mixed.safetensors",
+    "targetSubdir": "diffusion_models",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors",
+    "sizeHint": "~33 GB",
+    "notes": "Domyślny silnik obrazu w Studio (UNETLoader). Wymaga mistral_3_small_flux2_fp8 + flux2-vae. Na 16 GB: Dynamic VRAM — generacja dłuższa, OK dla jakości.",
+    "vramHintGb": 16
+  },
+  {
+    "id": "flux2-mistral-fp8",
+    "name": "Flux.2 Mistral 3 Small (fp8)",
+    "type": "clip",
+    "filename": "mistral_3_small_flux2_fp8.safetensors",
+    "targetSubdir": "text_encoders",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_fp8.safetensors",
+    "sizeHint": "~16.8 GB",
+    "notes": "CLIPLoader type=flux2 — FP8 (nie bf16). Wymagany przez workflow Flux.2.",
+    "vramHintGb": 8
+  },
+  {
+    "id": "flux2-vae",
+    "name": "Flux.2 VAE",
+    "type": "vae",
+    "filename": "flux2-vae.safetensors",
+    "targetSubdir": "vae",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/flux2-vae.safetensors",
+    "sizeHint": "~321 MB",
+    "notes": "VAELoader — wymagany przez workflow Flux.2 (Comfy-Org pack).",
+    "vramHintGb": 1
+  },
+  {
     "id": "sdxl-base",
     "name": "SDXL Base 1.0",
     "type": "checkpoint",
@@ -7,7 +40,7 @@
     "targetSubdir": "checkpoints",
     "downloadUrl": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
     "sizeHint": "~6.9 GB",
-    "notes": "Domyślny workflow obrazu w Studio. Komfortowo na 16 GB VRAM przy 1024².",
+    "notes": "Opcja w dropdownie Obraz (szybsza niż Flux). Komfortowo na 16 GB VRAM przy 1024².",
     "vramHintGb": 8
   },
   {

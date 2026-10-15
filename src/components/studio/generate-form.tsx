@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { DEFAULT_SDXL_NEGATIVE } from "@/lib/studio/defaults";
+import {
+  FLUX_MODEL_ID,
+  isFluxModel,
+  type ImageModelOption,
+} from "@/lib/studio/flux";
 
 type JobOutput = {
   filename: string;
@@ -13,21 +18,27 @@ type JobOutput = {
 type Props = {
   defaultModel: string;
   checkpoints: string[];
+  /** Prefabrykowane opcje Obraz (Flux + SDXL + checkpointy). */
+  imageModels?: ImageModelOption[];
   kind?: "image" | "video";
   videoLimitsNote?: string;
+  imageLimitsNote?: string;
 };
 
 export function GenerateForm({
   defaultModel,
   checkpoints,
+  imageModels,
   kind = "image",
   videoLimitsNote,
+  imageLimitsNote,
 }: Props) {
   const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState(
-    kind === "image" ? DEFAULT_SDXL_NEGATIVE : ""
-  );
   const [model, setModel] = useState(defaultModel);
+  const fluxSelected = kind === "image" && isFluxModel(model);
+  const [negativePrompt, setNegativePrompt] = useState(
+    kind === "image" && !isFluxModel(defaultModel) ? DEFAULT_SDXL_NEGATIVE : ""
+  );
   const [width, setWidth] = useState(kind === "video" ? 512 : 1024);
   const [height, setHeight] = useState(kind === "video" ? 512 : 1024);
   const [seed, setSeed] = useState(-1);
@@ -44,12 +55,72 @@ export function GenerateForm({
   const [status, setStatus] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<JobOutput[]>([]);
   const [pending, startTransition] = useTransition();
+  const [modelPromptPreview, setModelPromptPreview] = useState("");
+  const [modelNegativePreview, setModelNegativePreview] = useState("");
+  const [boostWarnings, setBoostWarnings] = useState<string[]>([]);
+  const [boostBusy, setBoostBusy] = useState(false);
+  const [boostOpen, setBoostOpen] = useState(true);
 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    const trimmed = prompt.trim();
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (!trimmed) {
+        if (cancelled) return;
+        setModelPromptPreview("");
+        setModelNegativePreview("");
+        setBoostWarnings([]);
+        setBoostBusy(false);
+        return;
+      }
+
+      if (!cancelled) setBoostBusy(true);
+      try {
+        const res = await fetch("/api/prompt-boost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            negativePrompt: kind === "image" ? negativePrompt : "",
+            kind,
+          }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.ok) {
+          setBoostWarnings([data.error ?? "Nie udało się przygotować promptu EN"]);
+          setModelPromptPreview(trimmed);
+          return;
+        }
+        setModelPromptPreview(String(data.modelPrompt ?? ""));
+        setModelNegativePreview(String(data.modelNegative ?? ""));
+        setBoostWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+        if (data.translated || data.boosted || data.detectedPolish) {
+          setBoostOpen(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setBoostWarnings([
+            "Podgląd EN niedostępny (sieć) — przy generacji użyję oryginału lub serwerowego boostu.",
+          ]);
+          setModelPromptPreview(trimmed);
+        }
+      } finally {
+        if (!cancelled) setBoostBusy(false);
+      }
+    }, trimmed ? 450 : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [prompt, negativePrompt, kind]);
 
   useEffect(() => {
     if (!promptId) return;
@@ -153,6 +224,16 @@ export function GenerateForm({
           setStatus(null);
           return;
         }
+        if (typeof data.modelPrompt === "string" && data.modelPrompt) {
+          setModelPromptPreview(data.modelPrompt);
+          setBoostOpen(true);
+        }
+        if (typeof data.modelNegative === "string") {
+          setModelNegativePreview(data.modelNegative);
+        }
+        if (data.promptBoost?.warnings?.length) {
+          setBoostWarnings(data.promptBoost.warnings);
+        }
         setPromptId(data.promptId);
       } catch {
         setError("Błąd sieci");
@@ -161,10 +242,20 @@ export function GenerateForm({
     });
   }
 
-  const modelOptions =
-    checkpoints.length > 0
-      ? Array.from(new Set([defaultModel, ...checkpoints]))
-      : [defaultModel];
+  const modelOptions: ImageModelOption[] =
+    kind === "image" && imageModels && imageModels.length > 0
+      ? imageModels
+      : (() => {
+          const values =
+            checkpoints.length > 0
+              ? Array.from(new Set([defaultModel, ...checkpoints]))
+              : [defaultModel];
+          return values.map((value) => ({
+            value,
+            label: value === FLUX_MODEL_ID ? "Flux.2 Dev (fp8)" : value,
+            engine: isFluxModel(value) ? ("flux" as const) : ("sdxl" as const),
+          }));
+        })();
 
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -268,13 +359,45 @@ export function GenerateForm({
             className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-stone-100 outline-none ring-teal-400/0 transition focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
             placeholder={
               kind === "video"
-                ? "Opis ruchu / klimatu (SVD używa głównie obrazu startowego)…"
-                : "Opisz obraz…"
+                ? "Opis ruchu / klimatu po polsku (SVD: głównie obraz startowy; prompt i tak idzie przez boost EN)…"
+                : "Opisz obraz po polsku…"
             }
           />
+          {prompt.trim() ? (
+            <details
+              open={boostOpen}
+              onToggle={(e) => setBoostOpen((e.target as HTMLDetailsElement).open)}
+              className="mt-2 rounded-lg border border-white/8 bg-black/20 px-3 py-2"
+            >
+              <summary className="cursor-pointer select-none text-xs text-stone-400">
+                Prompt do modelu (EN)
+                {boostBusy ? (
+                  <span className="ml-2 text-stone-600">aktualizuję…</span>
+                ) : null}
+              </summary>
+              <p className="mt-2 whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-stone-300">
+                {modelPromptPreview || "—"}
+              </p>
+              {kind === "image" &&
+              modelNegativePreview &&
+              modelNegativePreview !== negativePrompt.trim() ? (
+                <p className="mt-2 text-[11px] leading-relaxed text-stone-500">
+                  <span className="uppercase tracking-wider text-stone-600">
+                    Negatyw (EN):{" "}
+                  </span>
+                  {modelNegativePreview}
+                </p>
+              ) : null}
+              {boostWarnings.length > 0 ? (
+                <p className="mt-2 text-[11px] text-amber-200/80" role="status">
+                  {boostWarnings.join(" ")}
+                </p>
+              ) : null}
+            </details>
+          ) : null}
         </div>
 
-        {kind === "image" ? (
+        {kind === "image" && !fluxSelected ? (
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Negatyw
@@ -292,12 +415,22 @@ export function GenerateForm({
           <Field label="Model">
             <select
               value={model}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setModel(next);
+                if (kind === "image") {
+                  if (isFluxModel(next)) {
+                    setNegativePrompt("");
+                  } else if (!negativePrompt.trim()) {
+                    setNegativePrompt(DEFAULT_SDXL_NEGATIVE);
+                  }
+                }
+              }}
               className="w-full rounded-lg border border-white/10 bg-[#0b1614] px-3 py-2 text-sm"
             >
               {modelOptions.map((m) => (
-                <option key={m} value={m}>
-                  {m}
+                <option key={m.value} value={m.value}>
+                  {m.label}
                 </option>
               ))}
             </select>
@@ -369,6 +502,10 @@ export function GenerateForm({
             </>
           )}
         </div>
+
+        {kind === "image" && fluxSelected && imageLimitsNote ? (
+          <p className="text-sm text-amber-200/70">{imageLimitsNote}</p>
+        ) : null}
 
         {videoLimitsNote ? (
           <p className="text-sm text-amber-200/70">{videoLimitsNote}</p>

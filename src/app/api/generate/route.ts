@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { checkComfyHealth, enqueuePrompt } from "@/lib/studio/comfy-client";
+import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
 import { buildWorkflow } from "@/lib/studio/workflow-builder";
 
@@ -44,15 +45,38 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { workflow, template } = buildWorkflow(parsed.data);
+    const boost = await preparePromptForModel({
+      prompt: parsed.data.prompt,
+      negativePrompt: parsed.data.negativePrompt,
+      kind: parsed.data.kind,
+    });
+
+    const bodyForComfy = {
+      ...parsed.data,
+      prompt: boost.modelPrompt,
+      negativePrompt: boost.modelNegative,
+    };
+
+    const { workflow, template, engine } = buildWorkflow(bodyForComfy);
     const result = await enqueuePrompt(workflow);
     return NextResponse.json({
       ok: true,
       promptId: result.promptId,
       number: result.number,
       template,
+      engine,
       kind: parsed.data.kind,
       nodeErrors: result.nodeErrors,
+      modelPrompt: boost.modelPrompt,
+      modelNegative: boost.modelNegative,
+      promptBoost: {
+        translated: boost.translated,
+        negativeTranslated: boost.negativeTranslated,
+        boosted: boost.boosted,
+        detectedPolish: boost.detectedPolish,
+        provider: boost.provider,
+        warnings: boost.warnings,
+      },
     });
   } catch (err) {
     return NextResponse.json(
