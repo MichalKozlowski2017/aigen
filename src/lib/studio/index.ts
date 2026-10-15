@@ -8,4 +8,5 @@ export * from "./workflow-builder";
 export * from "./gallery";
 export * from "./models";
 export * from "./downloads";
+export * from "./prompt-boost";
 export { VIDEO_UI_LIMITS } from "./workflow-builder";

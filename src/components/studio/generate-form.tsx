@@ -44,12 +44,72 @@ export function GenerateForm({
   const [status, setStatus] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<JobOutput[]>([]);
   const [pending, startTransition] = useTransition();
+  const [modelPromptPreview, setModelPromptPreview] = useState("");
+  const [modelNegativePreview, setModelNegativePreview] = useState("");
+  const [boostWarnings, setBoostWarnings] = useState<string[]>([]);
+  const [boostBusy, setBoostBusy] = useState(false);
+  const [boostOpen, setBoostOpen] = useState(true);
 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    const trimmed = prompt.trim();
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      if (!trimmed) {
+        if (cancelled) return;
+        setModelPromptPreview("");
+        setModelNegativePreview("");
+        setBoostWarnings([]);
+        setBoostBusy(false);
+        return;
+      }
+
+      if (!cancelled) setBoostBusy(true);
+      try {
+        const res = await fetch("/api/prompt-boost", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            negativePrompt: kind === "image" ? negativePrompt : "",
+            kind,
+          }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.ok) {
+          setBoostWarnings([data.error ?? "Nie udało się przygotować promptu EN"]);
+          setModelPromptPreview(trimmed);
+          return;
+        }
+        setModelPromptPreview(String(data.modelPrompt ?? ""));
+        setModelNegativePreview(String(data.modelNegative ?? ""));
+        setBoostWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+        if (data.translated || data.boosted || data.detectedPolish) {
+          setBoostOpen(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setBoostWarnings([
+            "Podgląd EN niedostępny (sieć) — przy generacji użyję oryginału lub serwerowego boostu.",
+          ]);
+          setModelPromptPreview(trimmed);
+        }
+      } finally {
+        if (!cancelled) setBoostBusy(false);
+      }
+    }, trimmed ? 450 : 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [prompt, negativePrompt, kind]);
 
   useEffect(() => {
     if (!promptId) return;
@@ -152,6 +212,16 @@ export function GenerateForm({
           setError(data.error ?? "Generacja nieudana");
           setStatus(null);
           return;
+        }
+        if (typeof data.modelPrompt === "string" && data.modelPrompt) {
+          setModelPromptPreview(data.modelPrompt);
+          setBoostOpen(true);
+        }
+        if (typeof data.modelNegative === "string") {
+          setModelNegativePreview(data.modelNegative);
+        }
+        if (data.promptBoost?.warnings?.length) {
+          setBoostWarnings(data.promptBoost.warnings);
         }
         setPromptId(data.promptId);
       } catch {
@@ -268,10 +338,42 @@ export function GenerateForm({
             className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-stone-100 outline-none ring-teal-400/0 transition focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
             placeholder={
               kind === "video"
-                ? "Opis ruchu / klimatu (SVD używa głównie obrazu startowego)…"
-                : "Opisz obraz…"
+                ? "Opis ruchu / klimatu po polsku (SVD: głównie obraz startowy; prompt i tak idzie przez boost EN)…"
+                : "Opisz obraz po polsku…"
             }
           />
+          {prompt.trim() ? (
+            <details
+              open={boostOpen}
+              onToggle={(e) => setBoostOpen((e.target as HTMLDetailsElement).open)}
+              className="mt-2 rounded-lg border border-white/8 bg-black/20 px-3 py-2"
+            >
+              <summary className="cursor-pointer select-none text-xs text-stone-400">
+                Prompt do modelu (EN)
+                {boostBusy ? (
+                  <span className="ml-2 text-stone-600">aktualizuję…</span>
+                ) : null}
+              </summary>
+              <p className="mt-2 whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-stone-300">
+                {modelPromptPreview || "—"}
+              </p>
+              {kind === "image" &&
+              modelNegativePreview &&
+              modelNegativePreview !== negativePrompt.trim() ? (
+                <p className="mt-2 text-[11px] leading-relaxed text-stone-500">
+                  <span className="uppercase tracking-wider text-stone-600">
+                    Negatyw (EN):{" "}
+                  </span>
+                  {modelNegativePreview}
+                </p>
+              ) : null}
+              {boostWarnings.length > 0 ? (
+                <p className="mt-2 text-[11px] text-amber-200/80" role="status">
+                  {boostWarnings.join(" ")}
+                </p>
+              ) : null}
+            </details>
+          ) : null}
         </div>
 
         {kind === "image" ? (
