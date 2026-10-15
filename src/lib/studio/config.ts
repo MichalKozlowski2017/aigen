@@ -1,6 +1,8 @@
+import { FLUX_MODEL_ID } from "./flux";
 import type { StudioPublicConfig } from "./types";
 
 const DEFAULT_COMFY_URL = "http://127.0.0.1:8188";
+/** Checkpoint SDXL — opcja w dropdownie Obraz (nie domyślny silnik). */
 const DEFAULT_CHECKPOINT = "sd_xl_base_1.0.safetensors";
 
 function trimOrUndefined(value: string | undefined): string | undefined {
@@ -30,6 +32,14 @@ export function getDefaultCheckpoint(): string {
   );
 }
 
+/** Domyślny wybór w UI Obraz — Flux (jakość > czas). OVERRIDE: STUDIO_DEFAULT_IMAGE_MODEL=sdxl|flux|<plik> */
+export function getDefaultImageModel(): string {
+  const raw = trimOrUndefined(process.env.STUDIO_DEFAULT_IMAGE_MODEL);
+  if (!raw || raw === "flux") return FLUX_MODEL_ID;
+  if (raw === "sdxl") return getDefaultCheckpoint();
+  return raw;
+}
+
 export function getStudioPublicConfig(): StudioPublicConfig {
   const modelsDir = getModelsDir();
   const outputDir = getOutputDir();
@@ -41,5 +51,6 @@ export function getStudioPublicConfig(): StudioPublicConfig {
     outputDir,
     passwordRequired: Boolean(getStudioPassword()),
     defaultCheckpoint: getDefaultCheckpoint(),
+    defaultImageModel: getDefaultImageModel(),
   };
 }

@@ -19,8 +19,8 @@ export default async function StudioModelsPage() {
           Modele
         </h1>
         <p className="max-w-2xl text-stone-400">
-          Polecane checkpointy, LoRA i VAE pod ~16 GB VRAM. Pobieranie zapisuje pliki
-          wyłącznie w katalogu ComfyUI models.
+          Flux (UNET + CLIP + VAE), SDXL, SVD i LoRA pod ~16 GB VRAM. Pobieranie
+          zapisuje pliki wyłącznie w katalogu ComfyUI models.
         </p>
       </header>
       <ModelsClient

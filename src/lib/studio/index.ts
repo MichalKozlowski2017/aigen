@@ -4,6 +4,7 @@ export * from "./schemas";
 export * from "./auth";
 export * from "./auth-server";
 export * from "./comfy-client";
+export * from "./flux";
 export * from "./workflow-builder";
 export * from "./gallery";
 export * from "./models";

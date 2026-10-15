@@ -21,7 +21,13 @@ export type GalleryItem = {
   url: string;
 };
 
-export type ModelType = "checkpoint" | "lora" | "vae" | "other";
+export type ModelType =
+  | "checkpoint"
+  | "unet"
+  | "clip"
+  | "lora"
+  | "vae"
+  | "other";
 
 export type ModelCatalogEntry = {
   id: string;
@@ -67,4 +73,6 @@ export type StudioPublicConfig = {
   outputDir: string | null;
   passwordRequired: boolean;
   defaultCheckpoint: string;
+  /** Domyślny model w UI Obraz (`flux` albo nazwa checkpointu). */
+  defaultImageModel: string;
 };

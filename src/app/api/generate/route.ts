@@ -57,13 +57,14 @@ export async function POST(request: Request) {
       negativePrompt: boost.modelNegative,
     };
 
-    const { workflow, template } = buildWorkflow(bodyForComfy);
+    const { workflow, template, engine } = buildWorkflow(bodyForComfy);
     const result = await enqueuePrompt(workflow);
     return NextResponse.json({
       ok: true,
       promptId: result.promptId,
       number: result.number,
       template,
+      engine,
       kind: parsed.data.kind,
       nodeErrors: result.nodeErrors,
       modelPrompt: boost.modelPrompt,

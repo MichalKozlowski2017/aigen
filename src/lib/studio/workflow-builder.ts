@@ -1,6 +1,17 @@
 import type { GenerateBody } from "./schemas";
 import { getDefaultCheckpoint } from "./config";
 import { DEFAULT_SDXL_NEGATIVE } from "./defaults";
+import {
+  DEFAULT_FLUX_CLIP_TYPE,
+  DEFAULT_FLUX_GUIDANCE,
+  DEFAULT_FLUX_STEPS,
+  getFluxClipName,
+  getFluxUnetName,
+  getFluxVaeName,
+  getFluxWeightDtype,
+  isFluxModel,
+} from "./flux";
+import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
 import txt2videoTemplate from "./workflows/txt2video-svd.json";
 
@@ -27,14 +38,72 @@ function asGraph(raw: unknown): WorkflowGraph {
 export function buildWorkflow(body: GenerateBody): {
   workflow: WorkflowGraph;
   template: string;
+  engine: "flux" | "sdxl" | "svd";
 } {
   if (body.kind === "video") {
-    return { workflow: buildVideoWorkflow(body), template: "txt2video-svd" };
+    return {
+      workflow: buildVideoWorkflow(body),
+      template: "txt2video-svd",
+      engine: "svd",
+    };
   }
-  return { workflow: buildImageWorkflow(body), template: "txt2img-sdxl" };
+  if (isFluxModel(body.model)) {
+    return {
+      workflow: buildFluxImageWorkflow(body),
+      template: "txt2img-flux2",
+      engine: "flux",
+    };
+  }
+  return {
+    workflow: buildSdxlImageWorkflow(body),
+    template: "txt2img-sdxl",
+    engine: "sdxl",
+  };
 }
 
-function buildImageWorkflow(body: GenerateBody): WorkflowGraph {
+/**
+ * Flux.2 Dev (fp8): UNETLoader + CLIPLoader(type=flux2) + VAE + FluxGuidance
+ * + Flux2Scheduler + EmptyFlux2LatentImage + SamplerCustomAdvanced.
+ * Uproszczone względem blueprintu (bez turbo LoRA / ComfySwitch).
+ * Negatyw klasyczny nie jest używany.
+ */
+function buildFluxImageWorkflow(body: GenerateBody): WorkflowGraph {
+  const graph = asGraph(txt2imgFluxTemplate);
+  const seed =
+    body.seed === undefined || body.seed < 0
+      ? Math.floor(Math.random() * 2_147_483_647)
+      : body.seed;
+
+  const width = body.width ?? 1024;
+  const height = body.height ?? 1024;
+  const steps = body.steps ?? DEFAULT_FLUX_STEPS;
+  const guidance = body.cfg ?? DEFAULT_FLUX_GUIDANCE;
+
+  const unet =
+    body.model?.trim() && body.model.trim().toLowerCase() !== "flux"
+      ? body.model.trim()
+      : getFluxUnetName();
+
+  graph["122"].inputs.unet_name = unet;
+  graph["122"].inputs.weight_dtype = getFluxWeightDtype();
+  graph["111"].inputs.clip_name = getFluxClipName();
+  graph["111"].inputs.type = DEFAULT_FLUX_CLIP_TYPE;
+  graph["111"].inputs.device = "default";
+  graph["108"].inputs.vae_name = getFluxVaeName();
+  graph["115"].inputs.text = body.prompt;
+  graph["106"].inputs.guidance = guidance;
+  graph["113"].inputs.width = width;
+  graph["113"].inputs.height = height;
+  graph["113"].inputs.batch_size = body.batch ?? 1;
+  graph["112"].inputs.steps = steps;
+  graph["112"].inputs.width = width;
+  graph["112"].inputs.height = height;
+  graph["114"].inputs.noise_seed = seed;
+
+  return graph;
+}
+
+function buildSdxlImageWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2imgTemplate);
   const ckpt = body.model?.trim() || getDefaultCheckpoint();
   const seed =
