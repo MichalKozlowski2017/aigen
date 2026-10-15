@@ -3,10 +3,10 @@
     "class_type": "KSampler",
     "inputs": {
       "seed": 0,
-      "steps": 25,
-      "cfg": 7,
-      "sampler_name": "euler",
-      "scheduler": "normal",
+      "steps": 30,
+      "cfg": 5.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
       "denoise": 1,
       "model": ["4", 0],
       "positive": ["6", 0],
@@ -38,7 +38,7 @@
   "7": {
     "class_type": "CLIPTextEncode",
     "inputs": {
-      "text": "negative prompt",
+      "text": "blurry, low quality, watermark, text, deformed, cartoon, anime, plastic skin, oversaturated, 3d render, cgi",
       "clip": ["4", 1]
     }
   },
