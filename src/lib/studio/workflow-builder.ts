@@ -1,7 +1,10 @@
 import type { GenerateBody } from "./schemas";
 import { getDefaultCheckpoint } from "./config";
+import { DEFAULT_SDXL_NEGATIVE } from "./defaults";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
 import txt2videoTemplate from "./workflows/txt2video-svd.json";
+
+export { DEFAULT_SDXL_NEGATIVE } from "./defaults";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -45,11 +48,12 @@ function buildImageWorkflow(body: GenerateBody): WorkflowGraph {
   graph["5"].inputs.batch_size = body.batch ?? 1;
   graph["6"].inputs.text = body.prompt;
   graph["7"].inputs.text =
-    body.negativePrompt ||
-    "blurry, low quality, watermark, text, deformed";
+    body.negativePrompt?.trim() || DEFAULT_SDXL_NEGATIVE;
   graph["3"].inputs.seed = seed;
-  graph["3"].inputs.steps = body.steps ?? 25;
-  graph["3"].inputs.cfg = body.cfg ?? 7;
+  graph["3"].inputs.steps = body.steps ?? 30;
+  graph["3"].inputs.cfg = body.cfg ?? 5.5;
+  graph["3"].inputs.sampler_name = "dpmpp_2m";
+  graph["3"].inputs.scheduler = "karras";
 
   return graph;
 }
@@ -91,5 +95,5 @@ export const VIDEO_UI_LIMITS = {
   maxWidth: 576,
   maxHeight: 576,
   maxFps: 12,
-  note: "Limity dopasowane do ~16 GB VRAM (RTX 5080). Wymaga SVD + VHS oraz obrazu startowego w folderze input ComfyUI.",
+  note: "Limity dopasowane do ~16 GB VRAM (RTX 5080). Wymaga SVD + VHS. Wrzuć obraz startowy powyżej promptu (upload do Comfy input) albo podaj istniejącą nazwę pliku.",
 } as const;

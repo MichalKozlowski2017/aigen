@@ -206,3 +206,50 @@ export function comfyViewUrl(
   });
   return `${base}/view?${q.toString()}`;
 }
+
+export type ComfyUploadResult = {
+  name: string;
+  subfolder: string;
+  type: string;
+};
+
+/**
+ * Upload obrazu do ComfyUI input (POST /upload/image).
+ * Zwraca nazwę pliku do LoadImage / startImage.
+ */
+export async function uploadImageToComfy(
+  file: Blob,
+  filename: string,
+  options?: { overwrite?: boolean; subfolder?: string }
+): Promise<ComfyUploadResult> {
+  const form = new FormData();
+  form.append("image", file, filename);
+  form.append("overwrite", options?.overwrite === false ? "false" : "true");
+  form.append("type", "input");
+  if (options?.subfolder) {
+    form.append("subfolder", options.subfolder);
+  }
+
+  const res = await fetchComfy("/upload/image", {
+    method: "POST",
+    body: form,
+    timeoutMs: 60_000,
+  });
+  const data = (await res.json().catch(() => ({}))) as Partial<ComfyUploadResult> & {
+    error?: unknown;
+  };
+  if (!res.ok || !data.name) {
+    const message =
+      typeof data.error === "string"
+        ? data.error
+        : data.error
+          ? JSON.stringify(data.error)
+          : `ComfyUI upload failed (${res.status})`;
+    throw new Error(message);
+  }
+  return {
+    name: data.name,
+    subfolder: data.subfolder ?? "",
+    type: data.type ?? "input",
+  };
+}

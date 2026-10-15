@@ -27,7 +27,7 @@ python main.py --listen 127.0.0.1 --port 8188
 
 - Checkpoint **SVD XT** (`svd_xt.safetensors`) w `models/checkpoints`
 - Custom node **Video Helper Suite** (VHS) — node `VHS_VideoCombine`
-- Wrzuć obraz startowy do `ComfyUI/input` (np. `start.png`)
+- Obraz startowy: upload z panelu **Wideo** (nad promptem → `/api/upload` → Comfy `input`) albo ręcznie plik do `ComfyUI/input`
 
 ## 2. Zmienne ENV panelu
 

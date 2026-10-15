@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import { DEFAULT_SDXL_NEGATIVE } from "@/lib/studio/defaults";
 
 type JobOutput = {
   filename: string;
@@ -23,7 +24,9 @@ export function GenerateForm({
   videoLimitsNote,
 }: Props) {
   const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState(
+    kind === "image" ? DEFAULT_SDXL_NEGATIVE : ""
+  );
   const [model, setModel] = useState(defaultModel);
   const [width, setWidth] = useState(kind === "video" ? 512 : 1024);
   const [height, setHeight] = useState(kind === "video" ? 512 : 1024);
@@ -31,12 +34,22 @@ export function GenerateForm({
   const [batch, setBatch] = useState(1);
   const [durationSec, setDurationSec] = useState(2);
   const [fps, setFps] = useState(6);
-  const [startImage, setStartImage] = useState("start.png");
+  const [startImage, setStartImage] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [promptId, setPromptId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<JobOutput[]>([]);
   const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   useEffect(() => {
     if (!promptId) return;
@@ -66,12 +79,51 @@ export function GenerateForm({
     };
   }, [promptId]);
 
+  async function uploadStartFile(file: File) {
+    setError(null);
+    setUploadBusy(true);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(URL.createObjectURL(file));
+    try {
+      const body = new FormData();
+      body.append("image", file);
+      const res = await fetch("/api/upload", { method: "POST", body });
+      const data = await res.json();
+      if (!data.ok) {
+        setError(data.error ?? "Upload nieudany");
+        setStartImage("");
+        return;
+      }
+      setStartImage(data.startImage as string);
+    } catch {
+      setError("Błąd sieci przy uploadzie");
+      setStartImage("");
+    } finally {
+      setUploadBusy(false);
+    }
+  }
+
+  function onPickFile(file: File | undefined | null) {
+    if (!file) return;
+    if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
+      setError("Wybierz plik obrazu (PNG, JPEG, WebP, GIF)");
+      return;
+    }
+    void uploadStartFile(file);
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setOutputs([]);
     setStatus("queued");
     setPromptId(null);
+
+    if (kind === "video" && !startImage.trim()) {
+      setError("Dodaj obraz startowy (upload powyżej) albo wpisz nazwę pliku w Comfy input.");
+      setStatus(null);
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -88,7 +140,7 @@ export function GenerateForm({
         if (kind === "video") {
           body.durationSec = durationSec;
           body.fps = fps;
-          body.startImage = startImage;
+          body.startImage = startImage.trim();
         }
         const res = await fetch("/api/generate", {
           method: "POST",
@@ -117,6 +169,93 @@ export function GenerateForm({
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <form onSubmit={onSubmit} className="studio-fade-in space-y-5">
+        {kind === "video" ? (
+          <div className="space-y-3">
+            <label className="block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+              Obraz startowy
+            </label>
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                onPickFile(e.dataTransfer.files?.[0]);
+              }}
+              onClick={() => fileInputRef.current?.click()}
+              className={`cursor-pointer rounded-xl border border-dashed px-4 py-6 transition ${
+                dragOver
+                  ? "border-teal-400/60 bg-teal-400/10"
+                  : "border-white/15 bg-white/[0.03] hover:border-teal-400/35"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                className="hidden"
+                onChange={(e) => {
+                  onPickFile(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:text-left">
+                {previewUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewUrl}
+                    alt="Podgląd obrazu startowego"
+                    className="h-24 w-24 shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-xs text-stone-500">
+                    SVD
+                  </div>
+                )}
+                <div className="min-w-0 space-y-1">
+                  <p className="text-sm text-stone-200">
+                    {uploadBusy
+                      ? "Wgrywam do ComfyUI…"
+                      : startImage
+                        ? `Gotowe: ${startImage}`
+                        : "Upuść obraz tutaj albo kliknij, by wybrać plik"}
+                  </p>
+                  <p className="text-xs text-stone-500">
+                    Plik trafia do folderu input ComfyUI i staje się klatką startową SVD.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <Field label="Albo nazwa już w Comfy input">
+              <input
+                type="text"
+                value={startImage}
+                onChange={(e) => setStartImage(e.target.value)}
+                placeholder="np. start.png"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+              />
+            </Field>
+          </div>
+        ) : null}
+
         <div>
           <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
             Prompt
@@ -227,15 +366,6 @@ export function GenerateForm({
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label="Obraz startowy (Comfy input)">
-                <input
-                  type="text"
-                  value={startImage}
-                  onChange={(e) => setStartImage(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
-                  required
-                />
-              </Field>
             </>
           )}
         </div>
@@ -253,7 +383,7 @@ export function GenerateForm({
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
-            disabled={pending}
+            disabled={pending || uploadBusy}
             className="studio-cta rounded-lg bg-teal-400 px-5 py-2.5 text-sm font-semibold text-[#04201a] transition hover:bg-teal-300 disabled:opacity-60"
           >
             {pending ? "Kolejkuję…" : kind === "video" ? "Generuj wideo" : "Generuj obraz"}

@@ -10,11 +10,11 @@ export const generateBodySchema = z.object({
   seed: z.number().int().min(-1).max(2_147_483_647).optional(),
   batch: z.number().int().min(1).max(4).optional().default(1),
   steps: z.number().int().min(1).max(60).optional(),
-  cfg: z.number().min(1).max(20).optional(),
+  cfg: z.number().min(1).max(30).optional(),
   /** Sekundy klipu — tylko video */
   durationSec: z.number().min(1).max(8).optional(),
-  fps: z.number().int().min(8).max(24).optional(),
-  /** Opcjonalna ścieżka obrazu startowego (i2v) — nazwa w input Comfy */
+  fps: z.number().int().min(6).max(24).optional(),
+  /** Nazwa pliku w ComfyUI input (po uploadzie lub już obecna) */
   startImage: z.string().max(500).optional(),
 });
 

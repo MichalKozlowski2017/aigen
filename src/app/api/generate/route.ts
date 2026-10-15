@@ -32,12 +32,12 @@ export async function POST(request: Request) {
     );
   }
 
-  if (parsed.data.kind === "video" && !parsed.data.startImage) {
+  if (parsed.data.kind === "video" && !parsed.data.startImage?.trim()) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Workflow wideo (SVD) wymaga obrazu startowego w folderze input ComfyUI (pole startImage).",
+          "Workflow wideo (SVD) wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
       },
       { status: 400 }
     );

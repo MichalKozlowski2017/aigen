@@ -1,7 +1,7 @@
 {
   "_meta": {
     "title": "Studio text/image-to-video (SVD img2vid)",
-    "notes": "Wymaga checkpointu SVD (np. svd_xt.safetensors) w models/checkpoints oraz obrazu startowego w ComfyUI input. Przy samym tekście panel generuje najpierw klatkę SDXL, potem ten workflow — tu zakładamy startImage w input."
+    "notes": "Wymaga checkpointu SVD (np. svd_xt.safetensors) w models/checkpoints oraz obrazu startowego w ComfyUI input (upload z panelu /api/upload → LoadImage)."
   },
   "1": {
     "class_type": "CheckpointLoaderSimple",
