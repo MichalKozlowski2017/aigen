@@ -15,15 +15,12 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
-  estimateVideoFrames,
   planLtxVideo,
   planSvdVideo,
-  snapLtxLength,
   type VideoEngineId,
 } from "@/lib/studio/workflow-builder";
-import {
-  DEFAULT_LTX_CHECKPOINT,
-} from "@/lib/studio/video-engines";
+import { DEFAULT_LTX_CHECKPOINT } from "@/lib/studio/video-engines";
+import { pickChunkOutputs } from "@/lib/studio/video-outputs";
 
 type JobOutput = {
   filename: string;
@@ -125,9 +122,13 @@ export function GenerateForm({
         ? planLtxVideo({ width, height, fps, durationSec })
         : planSvdVideo({ width, height, fps, durationSec })
       : null;
-  const videoFrames =
-    videoPlan?.frames ?? estimateVideoFrames(durationSec, fps);
   const videoRisky = Boolean(videoPlan?.vramRisky);
+  const durationInputMax = videoLimits.maxDurationSec;
+  const [chunkInfo, setChunkInfo] = useState<{
+    index: number;
+    total: number;
+    label: string;
+  } | null>(null);
 
   function applyVideoEngine(next: VideoEngineId) {
     setVideoEngine(next);
@@ -362,6 +363,74 @@ export function GenerateForm({
     }
   }
 
+  function applyGenerateError(data: {
+    error?: string;
+    errorDetail?: ErrorDetail;
+    nodeErrors?: unknown;
+    comfyError?: unknown;
+  }) {
+    const detail = data.errorDetail;
+    const nodeErrors = data.nodeErrors ?? detail?.nodeErrors;
+    setErrorDetail({
+      message: detail?.message ?? data.error ?? "Generacja nieudana",
+      hint: detail?.hint,
+      linkHref: detail?.linkHref,
+      linkLabel: detail?.linkLabel,
+      code: detail?.code,
+      details:
+        detail?.details ||
+        (nodeErrors
+          ? typeof nodeErrors === "string"
+            ? nodeErrors
+            : JSON.stringify(nodeErrors, null, 2)
+          : undefined),
+      nodeErrors,
+      comfyError: data.comfyError ?? detail?.comfyError,
+    });
+    setError(data.error ?? detail?.message ?? "Generacja nieudana");
+    setStatus(null);
+    setStartedAtMs(null);
+    setChunkInfo(null);
+  }
+
+  async function waitForJob(
+    id: string,
+    opts?: { updateOutputs?: boolean; keepRunning?: boolean }
+  ): Promise<{
+    status: string;
+    outputs: JobOutput[];
+    progress?: JobProgress;
+  }> {
+    const updateOutputs = opts?.updateOutputs !== false;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`);
+      const data = await res.json();
+      if (!data.ok) {
+        throw new Error(data.error ?? "Błąd statusu joba");
+      }
+      const job = data.job as {
+        status: string;
+        outputs?: JobOutput[];
+        progress?: JobProgress;
+      };
+      if (opts?.keepRunning && job.status === "completed") {
+        setStatus("running");
+      } else {
+        setStatus(job.status);
+      }
+      if (updateOutputs) setOutputs(job.outputs ?? []);
+      if (job.progress) setJobProgress(job.progress);
+      if (job.status === "completed" || job.status === "failed") {
+        return {
+          status: job.status,
+          outputs: job.outputs ?? [],
+          progress: job.progress,
+        };
+      }
+    }
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -371,6 +440,7 @@ export function GenerateForm({
     setNodesTotalHint(null);
     setStatus("queued");
     setPromptId(null);
+    setChunkInfo(null);
     setStartedAtMs(Date.now());
 
     if (kind === "video" && !startImage.trim()) {
@@ -382,7 +452,7 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
-        const body: Record<string, unknown> = {
+        const baseBody: Record<string, unknown> = {
           kind,
           prompt,
           negativePrompt,
@@ -392,12 +462,188 @@ export function GenerateForm({
           seed,
           batch: kind === "image" ? batch : 1,
         };
+
+        // ——— LTX długie wideo: chunki + stitch (Legion pattern) ———
+        if (
+          kind === "video" &&
+          videoEngine === "ltx" &&
+          videoPlan?.chunkPlan?.chunked
+        ) {
+          const plan = videoPlan.chunkPlan;
+          const clips: Array<{
+            filename: string;
+            subfolder: string;
+            type: string;
+          }> = [];
+          let cursorStart = startImage.trim();
+          let cursorSource = startImageSource;
+
+          for (const chunk of plan.chunks) {
+            const isLast = chunk.index === plan.chunkCount - 1;
+            setChunkInfo({
+              index: chunk.index + 1,
+              total: plan.chunkCount,
+              label: `chunk ${chunk.index + 1}/${plan.chunkCount} (${chunk.length} klatek)`,
+            });
+            setStatus("queued");
+            setJobProgress({
+              percent: Math.round((chunk.index / plan.chunkCount) * 100),
+              phase: `chunk ${chunk.index + 1}/${plan.chunkCount}`,
+              queuePending: 0,
+              queueRunning: false,
+              currentNodeId: null,
+              currentNodeType: null,
+              nodesDone: null,
+              nodesTotal: null,
+              executionStartMs: null,
+              errorMessage: null,
+              errorHint: null,
+              errorLinkHref: null,
+              errorLinkLabel: null,
+            });
+
+            const body = {
+              ...baseBody,
+              durationSec,
+              fps,
+              startImage: cursorStart,
+              videoEngine: "ltx",
+              faceRestore,
+              ltxChunkLength: chunk.length,
+              ltxSaveTail: !isLast,
+              ltxChunkIndex: chunk.index,
+              ...(cursorSource ? { startImageSource: cursorSource } : {}),
+            };
+
+            const res = await fetch("/api/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+              applyGenerateError(data);
+              return;
+            }
+            if (typeof data.modelPrompt === "string" && data.modelPrompt) {
+              setModelPromptPreview(data.modelPrompt);
+            }
+            setPromptId(data.promptId);
+            const job = await waitForJob(data.promptId as string, {
+              updateOutputs: false,
+              keepRunning: true,
+            });
+            if (job.status === "failed") {
+              setError(job.progress?.errorMessage ?? "Chunk nieudany");
+              setStatus("failed");
+              setChunkInfo(null);
+              return;
+            }
+            const picked = pickChunkOutputs(job.outputs);
+            if (!picked.video) {
+              setError("Chunk zakończony bez pliku mp4 w outputach.");
+              setStatus("failed");
+              setChunkInfo(null);
+              return;
+            }
+            clips.push(picked.video);
+            if (!isLast) {
+              if (!picked.tail) {
+                setError(
+                  "Brak klatki końcowej (ltx-tail) — nie można kontynuować chunków."
+                );
+                setStatus("failed");
+                setChunkInfo(null);
+                return;
+              }
+              cursorStart = picked.tail.filename;
+              cursorSource = {
+                filename: picked.tail.filename,
+                subfolder: picked.tail.subfolder,
+                type: picked.tail.type,
+              };
+            }
+          }
+
+          setChunkInfo({
+            index: plan.chunkCount,
+            total: plan.chunkCount,
+            label: `sklejanie ${clips.length} odcinków…`,
+          });
+          setStatus("running");
+          setJobProgress({
+            percent: 95,
+            phase: "ffmpeg stitch",
+            queuePending: 0,
+            queueRunning: false,
+            currentNodeId: null,
+            currentNodeType: null,
+            nodesDone: null,
+            nodesTotal: null,
+            executionStartMs: null,
+            errorMessage: null,
+            errorHint: null,
+            errorLinkHref: null,
+            errorLinkLabel: null,
+          });
+
+          const stitchRes = await fetch("/api/video/stitch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              clips,
+              fps,
+              overlapFrames: plan.overlap,
+              filenamePrefix: "studio/video-ltx-stitched",
+            }),
+          });
+          const stitchData = await stitchRes.json();
+          if (!stitchData.ok) {
+            setError(stitchData.error ?? "Stitch nieudany");
+            setStatus("failed");
+            setChunkInfo(null);
+            return;
+          }
+          setOutputs([
+            {
+              filename: stitchData.filename as string,
+              subfolder: (stitchData.subfolder as string) || "studio",
+              type: (stitchData.type as string) || "output",
+            },
+          ]);
+          setStatus("completed");
+          setChunkInfo(null);
+          setJobProgress({
+            percent: 100,
+            phase: "gotowe (stitched)",
+            queuePending: 0,
+            queueRunning: false,
+            currentNodeId: null,
+            currentNodeType: null,
+            nodesDone: null,
+            nodesTotal: null,
+            executionStartMs: null,
+            errorMessage: null,
+            errorHint: null,
+            errorLinkHref: null,
+            errorLinkLabel: null,
+          });
+          return;
+        }
+
+        // ——— Pojedynczy job (obraz / SVD / LTX ≤121) ———
+        const body: Record<string, unknown> = { ...baseBody };
         if (kind === "video") {
           body.durationSec = durationSec;
           body.fps = fps;
           body.startImage = startImage.trim();
           body.videoEngine = videoEngine;
           body.faceRestore = faceRestore;
+          if (videoEngine === "ltx" && videoPlan?.chunkPlan?.chunks[0]) {
+            body.ltxChunkLength = videoPlan.chunkPlan.chunks[0].length;
+            body.ltxSaveTail = false;
+            body.ltxChunkIndex = 0;
+          }
           if (startImageSource) {
             body.startImageSource = startImageSource;
           }
@@ -409,27 +655,7 @@ export function GenerateForm({
         });
         const data = await res.json();
         if (!data.ok) {
-          const detail = data.errorDetail as ErrorDetail | undefined;
-          const nodeErrors = data.nodeErrors ?? detail?.nodeErrors;
-          setErrorDetail({
-            message: detail?.message ?? data.error ?? "Generacja nieudana",
-            hint: detail?.hint,
-            linkHref: detail?.linkHref,
-            linkLabel: detail?.linkLabel,
-            code: detail?.code,
-            details:
-              detail?.details ||
-              (nodeErrors
-                ? typeof nodeErrors === "string"
-                  ? nodeErrors
-                  : JSON.stringify(nodeErrors, null, 2)
-                : undefined),
-            nodeErrors,
-            comfyError: data.comfyError ?? detail?.comfyError,
-          });
-          setError(data.error ?? detail?.message ?? "Generacja nieudana");
-          setStatus(null);
-          setStartedAtMs(null);
+          applyGenerateError(data);
           return;
         }
         if (typeof data.modelPrompt === "string" && data.modelPrompt) {
@@ -798,14 +1024,19 @@ export function GenerateForm({
             </Field>
           ) : (
             <>
-              <Field label={`Czas (s, max ${videoLimits.maxDurationSec})`}>
+              <Field
+                label={`Czas zadany (s, max ${durationInputMax} @ ${fps} FPS)`}
+              >
                 <input
                   type="number"
                   min={1}
-                  max={videoLimits.maxDurationSec}
+                  max={durationInputMax}
                   step={0.5}
                   value={durationSec}
-                  onChange={(e) => setDurationSec(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setDurationSec(Math.min(next, durationInputMax));
+                  }}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
@@ -823,36 +1054,60 @@ export function GenerateForm({
           )}
         </div>
 
-        {kind === "video" ? (
+        {kind === "video" && videoPlan ? (
           <div className="space-y-1.5 text-sm">
-            <p className="text-stone-400">
-              Klatki ≈{" "}
-              <span className="font-mono text-stone-200">{videoFrames}</span>
-              {videoEngine === "ltx" ? (
+            <p className="text-stone-200">
+              Wyjdzie{" "}
+              <span className="font-mono text-teal-100">
+                {videoPlan.effectiveDurationSec}s
+              </span>{" "}
+              (
+              <span className="font-mono">{videoPlan.frames}</span> klatek @{" "}
+              <span className="font-mono">{videoPlan.fps}</span> FPS)
+              {videoEngine === "ltx" && videoPlan.chunkPlan?.chunked ? (
+                <span className="text-teal-100/80">
+                  {" "}
+                  · {videoPlan.chunkPlan.chunkCount} chunków (overlap{" "}
+                  {videoPlan.chunkPlan.overlap} + stitch)
+                </span>
+              ) : videoEngine === "ltx" ? (
                 <span className="text-stone-500">
                   {" "}
-                  (LTX length 8n+1, snap{" "}
-                  {snapLtxLength(estimateVideoFrames(durationSec, fps))})
+                  · 1 chunk · LTX length 8n+1 (≤{LTX_UI_LIMITS.maxLength})
                 </span>
-              ) : (
-                <span className="text-stone-500">
-                  {" "}
-                  ({durationSec}s × {fps} FPS)
-                </span>
-              )}
-              {videoLimitsNote ? (
-                <span className="text-stone-500"> · {videoLimitsNote}</span>
               ) : null}
             </p>
+            {videoPlan.durationClamped ? (
+              <p className="text-amber-200/85">
+                Zadany czas przekracza max{" "}
+                {videoEngine === "ltx"
+                  ? LTX_UI_LIMITS.maxDurationSec
+                  : videoPlan.maxDurationAtFps}
+                s
+                {videoEngine === "ltx"
+                  ? ` (chunki ≤${LTX_UI_LIMITS.maxLength} klatek)`
+                  : ` przy ${videoPlan.fps} FPS`}{" "}
+                — wysyłamy {videoPlan.frames} klatek /{" "}
+                {videoPlan.effectiveDurationSec}s
+                {videoEngine === "ltx" && videoPlan.chunkPlan?.chunked
+                  ? ` w ${videoPlan.chunkPlan.chunkCount} odcinkach`
+                  : ""}
+                .
+              </p>
+            ) : null}
+            {videoLimitsNote ? (
+              <p className="text-stone-500">{videoLimitsNote}</p>
+            ) : null}
             <p className="text-stone-500">
               Start frame w Comfy <code className="text-stone-400">input</code> —
-              upload / „Z galerii”. {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
+              upload / „Z galerii”.{" "}
+              {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
             </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
                 {videoEngine === "ltx"
-                  ? `Uwaga VRAM (~16 GB): LTX powyżej ~${LTX_UI_LIMITS.comfortLength} klatek / ${LTX_UI_LIMITS.comfortDurationSec}s często OOM. Skróć czas albo rozdzielczość.`
-                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM. LTX jest lepszy jakościowo przy krótkich klipach.`}
+                  ? `Uwaga VRAM (~16 GB): chunk >~${LTX_UI_LIMITS.comfortLength} klatek — Legion SAFE to ${LTX_UI_LIMITS.maxLength} @ 768×512; dłuższe wideo idzie chunkami.`
+                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
               </p>
             ) : null}
           </div>
@@ -894,7 +1149,13 @@ export function GenerateForm({
             disabled={pending || uploadBusy}
             className="studio-cta rounded-lg bg-teal-400 px-5 py-2.5 text-sm font-semibold text-[#04201a] transition hover:bg-teal-300 disabled:opacity-60"
           >
-            {pending ? "Kolejkuję…" : kind === "video" ? "Generuj wideo" : "Generuj obraz"}
+            {pending
+              ? chunkInfo
+                ? `Chunk ${chunkInfo.index}/${chunkInfo.total}…`
+                : "Kolejkuję…"
+              : kind === "video"
+                ? "Generuj wideo"
+                : "Generuj obraz"}
           </button>
           <Link
             href="/gallery"
@@ -918,6 +1179,7 @@ export function GenerateForm({
               nodesTotalHint={nodesTotalHint}
               startedAtMs={startedAtMs}
               nowMs={nowMs}
+              chunkInfo={chunkInfo}
             />
           ) : (
             <p className="text-sm text-stone-500">
@@ -1012,6 +1274,7 @@ function GenerationProgressPanel({
   nodesTotalHint,
   startedAtMs,
   nowMs,
+  chunkInfo,
 }: {
   status: string | null;
   promptId: string | null;
@@ -1019,16 +1282,22 @@ function GenerationProgressPanel({
   nodesTotalHint: number | null;
   startedAtMs: number | null;
   nowMs: number;
+  chunkInfo: { index: number; total: number; label: string } | null;
 }) {
   const nodesTotal = progress?.nodesTotal ?? nodesTotalHint;
   const nodesDone = progress?.nodesDone;
-  const start =
-    progress?.executionStartMs && progress.executionStartMs > 1e11
-      ? progress.executionStartMs
-      : startedAtMs;
+  const start = startedAtMs;
   const elapsed = start ? nowMs - start : null;
 
   let percent = progress?.percent;
+  if (chunkInfo && status !== "completed" && status !== "failed") {
+    const base = ((chunkInfo.index - 1) / chunkInfo.total) * 100;
+    const within =
+      progress?.percent != null
+        ? (progress.percent / 100) * (100 / chunkInfo.total)
+        : 0;
+    percent = Math.min(99, Math.round(base + within));
+  }
   if (percent == null && status === "queued") percent = 8;
   if (percent == null && status === "running") {
     percent =
@@ -1044,16 +1313,19 @@ function GenerationProgressPanel({
   const indeterminate =
     percent == null && (status === "running" || status === "queued");
   const width = percent != null ? `${percent}%` : indeterminate ? "40%" : "0%";
+  const phaseLabel =
+    chunkInfo?.label || progress?.phase || status || "…";
 
   return (
     <div className="mb-3 space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-sm text-stone-400">
           Status:{" "}
-          <span className="text-teal-200">
-            {progress?.phase || status || "…"}
-          </span>
-          {status && progress?.phase && status !== progress.phase ? (
+          <span className="text-teal-200">{phaseLabel}</span>
+          {status &&
+          !chunkInfo &&
+          progress?.phase &&
+          status !== progress.phase ? (
             <span className="ml-1 text-stone-600">({status})</span>
           ) : null}
         </p>
@@ -1073,6 +1345,14 @@ function GenerationProgressPanel({
         />
       </div>
       <dl className="grid gap-1 text-[11px] text-stone-500 sm:grid-cols-2">
+        {chunkInfo ? (
+          <div>
+            <dt className="inline text-stone-600">chunk · </dt>
+            <dd className="inline font-mono text-stone-400">
+              {chunkInfo.index}/{chunkInfo.total}
+            </dd>
+          </div>
+        ) : null}
         {promptId ? (
           <div>
             <dt className="inline text-stone-600">prompt_id · </dt>

@@ -22,6 +22,9 @@ export {
   planLtxVideo,
   planVideo,
   resolveVideoEngine,
+  snapLtxLength,
+  maxLtxDurationAtFps,
+  effectiveDurationSec,
 } from "./workflow-builder";
 export { ensureStartImageInComfyInput } from "./ensure-start-image";
 export {

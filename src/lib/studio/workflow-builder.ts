@@ -18,13 +18,19 @@ import {
   DEFAULT_VIDEO_ENGINE,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
+  effectiveDurationSec,
+  maxLtxDurationAtFps,
   snapLtxLength,
   type VideoEngineId,
 } from "./video-engines";
+import { planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
 import txt2videoLtxTemplate from "./workflows/txt2video-ltx.json";
 import txt2videoSvdTemplate from "./workflows/txt2video-svd.json";
+
+export type { LtxChunkPlan } from "./ltx-chunks";
+export { planLtxChunks } from "./ltx-chunks";
 
 export { DEFAULT_SDXL_NEGATIVE } from "./defaults";
 export {
@@ -36,6 +42,8 @@ export {
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
   snapLtxLength,
+  maxLtxDurationAtFps,
+  effectiveDurationSec,
   type VideoEngineId,
 } from "./video-engines";
 
@@ -191,9 +199,19 @@ export type VideoPlan = {
   width: number;
   height: number;
   fps: number;
+  /** Czas zadany przez usera (po clamp UI maxDurationSec). */
   durationSec: number;
+  /** Faktyczna długość po stitch = uniqueFrames/fps */
+  effectiveDurationSec: number;
+  /** Unikalne klatki w finalnym mp4 (po overlap) */
   frames: number;
+  /** true gdy UI musiał przyciąć czas do maxDurationSec */
+  durationClamped: boolean;
+  /** Max s jednego chunka przy FPS (121/fps) — nie limituje długiego wideo */
+  maxDurationAtFps: number;
   vramRisky: boolean;
+  /** Plan chunków LTX (1 = bez dzielenia) */
+  chunkPlan?: LtxChunkPlan;
 };
 
 export type SvdVideoPlan = VideoPlan;
@@ -232,14 +250,17 @@ export function planSvdVideo(body: {
     Math.max(Math.round(body.fps ?? SVD_UI_LIMITS.defaultFps), 1),
     SVD_UI_LIMITS.maxFps
   );
-  const durationSec = Math.min(
-    Math.max(body.durationSec ?? SVD_UI_LIMITS.defaultDurationSec, 1),
-    SVD_UI_LIMITS.maxDurationSec
+  const maxDurationAtFps = SVD_UI_LIMITS.maxDurationSec;
+  const requested = Math.max(
+    body.durationSec ?? SVD_UI_LIMITS.defaultDurationSec,
+    1
   );
+  const durationSec = Math.min(requested, maxDurationAtFps);
   const frames = Math.min(
     estimateVideoFrames(durationSec, fps),
     SVD_UI_LIMITS.schemaMaxFrames
   );
+  const effective = effectiveDurationSec(frames, fps);
 
   return {
     engine: "svd",
@@ -247,10 +268,13 @@ export function planSvdVideo(body: {
     height: Math.max(16, height),
     fps,
     durationSec,
+    effectiveDurationSec: effective,
     frames,
+    durationClamped: requested > maxDurationAtFps + 0.05,
+    maxDurationAtFps,
     vramRisky:
       frames > SVD_UI_LIMITS.comfortFrames ||
-      durationSec > SVD_UI_LIMITS.comfortDurationSec ||
+      effective > SVD_UI_LIMITS.comfortDurationSec ||
       fps > SVD_UI_LIMITS.comfortFps,
   };
 }
@@ -277,11 +301,16 @@ export function planLtxVideo(body: {
     Math.max(Math.round(body.fps ?? LTX_UI_LIMITS.defaultFps), 1),
     LTX_UI_LIMITS.maxFps
   );
-  const durationSec = Math.min(
-    Math.max(body.durationSec ?? LTX_UI_LIMITS.defaultDurationSec, 1),
-    LTX_UI_LIMITS.maxDurationSec
+  const maxChunkDuration = maxLtxDurationAtFps(fps);
+  const requested = Math.max(
+    body.durationSec ?? LTX_UI_LIMITS.defaultDurationSec,
+    1
   );
-  const frames = snapLtxLength(estimateVideoFrames(durationSec, fps));
+  const durationSec = Math.min(requested, LTX_UI_LIMITS.maxDurationSec);
+  const requestedFrames = estimateVideoFrames(durationSec, fps);
+  const chunkPlan = planLtxChunks(requestedFrames, fps);
+  const frames = chunkPlan.totalUniqueFrames;
+  const effective = chunkPlan.effectiveDurationSec;
 
   return {
     engine: "ltx",
@@ -289,10 +318,15 @@ export function planLtxVideo(body: {
     height: Math.max(64, height),
     fps,
     durationSec,
+    effectiveDurationSec: effective,
     frames,
-    vramRisky:
-      frames > LTX_UI_LIMITS.comfortLength ||
-      durationSec > LTX_UI_LIMITS.comfortDurationSec,
+    durationClamped: requested > LTX_UI_LIMITS.maxDurationSec + 0.05,
+    maxDurationAtFps: maxChunkDuration,
+    // Chunki ≤121 = Legion SAFE; ostrzegaj tylko gdy pojedynczy odcinek > comfort
+    vramRisky: chunkPlan.chunks.some(
+      (c) => c.length > LTX_UI_LIMITS.comfortLength
+    ),
+    chunkPlan,
   };
 }
 
@@ -330,7 +364,7 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
 /**
  * LTXV 2B I2V — CheckpointLoaderSimple + CLIPLoader(type=ltxv) + LTXVImgToVideo
- * + SamplerCustom + VHS. Opcjonalnie CodeFormer na klatkach przed combine.
+ * + SamplerCustom + VHS. Opcjonalnie CodeFormer; opcjonalnie zapis last-frame (chunk continue).
  */
 function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2videoLtxTemplate);
@@ -340,10 +374,20 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
       : body.seed;
 
   const plan = planLtxVideo(body);
+  const chunkLength =
+    body.ltxChunkLength != null
+      ? snapLtxLength(body.ltxChunkLength)
+      : plan.chunkPlan && !plan.chunkPlan.chunked
+        ? plan.chunkPlan.chunks[0]!.length
+        : snapLtxLength(plan.frames);
+
   const ckpt =
     body.model?.trim() && !body.model.toLowerCase().includes("svd")
       ? body.model.trim()
       : DEFAULT_LTX_CHECKPOINT;
+
+  const chunkIdx = body.ltxChunkIndex ?? 0;
+  const prefix = `studio/video-ltx-c${chunkIdx}`;
 
   graph["10"].inputs.ckpt_name = ckpt;
   graph["11"].inputs.clip_name = DEFAULT_LTX_CLIP;
@@ -357,16 +401,38 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
     "low quality, worst quality, deformed, distorted, motion smear, bad anatomy";
   graph["15"].inputs.width = plan.width;
   graph["15"].inputs.height = plan.height;
-  graph["15"].inputs.length = plan.frames;
+  graph["15"].inputs.length = chunkLength;
   graph["15"].inputs.strength = 1;
   graph["16"].inputs.frame_rate = plan.fps;
   graph["17"].inputs.steps = body.steps ?? 20;
   graph["19"].inputs.noise_seed = seed;
   graph["19"].inputs.cfg = body.cfg ?? 3;
   graph["21"].inputs.frame_rate = plan.fps;
+  graph["21"].inputs.filename_prefix = prefix;
 
+  let imageSourceForTail: string = "20";
   if (body.faceRestore) {
     spliceFaceRestore(graph, "20", "21");
+    imageSourceForTail = "91";
+  }
+
+  // Ostatnia klatka → input kolejnego chunka (Legion: last-frame continue)
+  if (body.ltxSaveTail) {
+    graph["22"] = {
+      class_type: "ImageFromBatch",
+      inputs: {
+        image: [imageSourceForTail, 0],
+        batch_index: -1,
+        length: 1,
+      },
+    };
+    graph["23"] = {
+      class_type: "SaveImage",
+      inputs: {
+        images: ["22", 0],
+        filename_prefix: `studio/ltx-tail-c${chunkIdx}`,
+      },
+    };
   }
 
   return graph;
