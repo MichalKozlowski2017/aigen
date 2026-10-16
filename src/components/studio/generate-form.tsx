@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
+import type { JobProgress } from "@/lib/studio/comfy-client";
 import { DEFAULT_SDXL_NEGATIVE } from "@/lib/studio/defaults";
 import {
   FLUX_MODEL_ID,
@@ -9,11 +10,22 @@ import {
   type ImageModelOption,
 } from "@/lib/studio/flux";
 import type { GalleryItem } from "@/lib/studio/types";
+import {
+  VIDEO_UI_LIMITS,
+  estimateVideoFrames,
+} from "@/lib/studio/workflow-builder";
 
 type JobOutput = {
   filename: string;
   subfolder: string;
   type: string;
+};
+
+type ErrorDetail = {
+  message: string;
+  hint?: string;
+  linkHref?: string;
+  linkLabel?: string;
 };
 
 type Props = {
@@ -52,9 +64,14 @@ export function GenerateForm({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<ErrorDetail | null>(null);
   const [promptId, setPromptId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<JobOutput[]>([]);
+  const [jobProgress, setJobProgress] = useState<JobProgress | null>(null);
+  const [nodesTotalHint, setNodesTotalHint] = useState<number | null>(null);
+  const [startedAtMs, setStartedAtMs] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [pending, startTransition] = useTransition();
   const [modelPromptPreview, setModelPromptPreview] = useState("");
   const [modelNegativePreview, setModelNegativePreview] = useState("");
@@ -65,6 +82,13 @@ export function GenerateForm({
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
+
+  const videoFrames = estimateVideoFrames(durationSec, fps);
+  const videoRisky =
+    kind === "video" &&
+    (durationSec > VIDEO_UI_LIMITS.comfortDurationSec ||
+      fps > VIDEO_UI_LIMITS.comfortFps ||
+      videoFrames > 48);
 
   useEffect(() => {
     return () => {
@@ -171,12 +195,29 @@ export function GenerateForm({
           setError(data.error ?? "Błąd statusu");
           return;
         }
-        setStatus(data.job.status);
-        setOutputs(data.job.outputs ?? []);
-        if (data.job.status === "completed" || data.job.status === "failed") {
+        const job = data.job as {
+          status: string;
+          outputs?: JobOutput[];
+          progress?: JobProgress;
+        };
+        setStatus(job.status);
+        setOutputs(job.outputs ?? []);
+        if (job.progress) {
+          setJobProgress(job.progress);
+          if (job.progress.errorMessage) {
+            setErrorDetail({
+              message: job.progress.errorMessage,
+              hint: job.progress.errorHint ?? undefined,
+              linkHref: job.progress.errorLinkHref ?? undefined,
+              linkLabel: job.progress.errorLinkLabel ?? undefined,
+            });
+            setError(job.progress.errorMessage);
+          }
+        }
+        if (job.status === "completed" || job.status === "failed") {
           return;
         }
-        window.setTimeout(tick, 1500);
+        window.setTimeout(tick, 1200);
       } catch {
         if (!cancelled) setError("Nie udało się odpytać joba");
       }
@@ -186,6 +227,12 @@ export function GenerateForm({
       cancelled = true;
     };
   }, [promptId]);
+
+  useEffect(() => {
+    if (!promptId || status === "completed" || status === "failed") return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [promptId, status]);
 
   async function uploadStartFile(file: File) {
     setError(null);
@@ -246,13 +293,18 @@ export function GenerateForm({
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setErrorDetail(null);
     setOutputs([]);
+    setJobProgress(null);
+    setNodesTotalHint(null);
     setStatus("queued");
     setPromptId(null);
+    setStartedAtMs(Date.now());
 
     if (kind === "video" && !startImage.trim()) {
       setError("Dodaj obraz startowy (upload powyżej) albo wpisz nazwę pliku w Comfy input.");
       setStatus(null);
+      setStartedAtMs(null);
       return;
     }
 
@@ -280,8 +332,11 @@ export function GenerateForm({
         });
         const data = await res.json();
         if (!data.ok) {
-          setError(data.error ?? "Generacja nieudana");
+          const detail = data.errorDetail as ErrorDetail | undefined;
+          setErrorDetail(detail ?? null);
+          setError(data.error ?? detail?.message ?? "Generacja nieudana");
           setStatus(null);
+          setStartedAtMs(null);
           return;
         }
         if (typeof data.modelPrompt === "string" && data.modelPrompt) {
@@ -294,10 +349,29 @@ export function GenerateForm({
         if (data.promptBoost?.warnings?.length) {
           setBoostWarnings(data.promptBoost.warnings);
         }
+        if (typeof data.nodesTotal === "number") {
+          setNodesTotalHint(data.nodesTotal);
+        }
         setPromptId(data.promptId);
+        setJobProgress({
+          percent: 5,
+          phase: "w kolejce",
+          queuePending: 0,
+          queueRunning: false,
+          currentNodeId: null,
+          currentNodeType: null,
+          nodesDone: null,
+          nodesTotal: typeof data.nodesTotal === "number" ? data.nodesTotal : null,
+          executionStartMs: Date.now(),
+          errorMessage: null,
+          errorHint: null,
+          errorLinkHref: null,
+          errorLinkLabel: null,
+        });
       } catch {
         setError("Błąd sieci");
         setStatus(null);
+        setStartedAtMs(null);
       }
     });
   }
@@ -584,22 +658,22 @@ export function GenerateForm({
             </Field>
           ) : (
             <>
-              <Field label="Czas (s, max 4)">
+              <Field label={`Czas (s, max ${VIDEO_UI_LIMITS.maxDurationSec})`}>
                 <input
                   type="number"
                   min={1}
-                  max={4}
+                  max={VIDEO_UI_LIMITS.maxDurationSec}
                   step={0.5}
                   value={durationSec}
                   onChange={(e) => setDurationSec(Number(e.target.value))}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label="FPS (max 12)">
+              <Field label={`FPS (max ${VIDEO_UI_LIMITS.maxFps})`}>
                 <input
                   type="number"
-                  min={6}
-                  max={12}
+                  min={1}
+                  max={VIDEO_UI_LIMITS.maxFps}
                   value={fps}
                   onChange={(e) => setFps(Number(e.target.value))}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -609,18 +683,48 @@ export function GenerateForm({
           )}
         </div>
 
+        {kind === "video" ? (
+          <div className="space-y-1.5 text-sm">
+            <p className="text-stone-400">
+              Klatki ≈ <span className="font-mono text-stone-200">{videoFrames}</span>{" "}
+              ({durationSec}s × {fps} FPS)
+              {videoLimitsNote ? (
+                <span className="text-stone-500"> · {videoLimitsNote}</span>
+              ) : null}
+            </p>
+            {videoRisky ? (
+              <p className="text-amber-200/85">
+                Uwaga VRAM (~16 GB): powyżej ~{VIDEO_UI_LIMITS.comfortDurationSec}–
+                8 s lub wysokiego FPS SVD XT często kończy się OOM albo bardzo długą
+                generacją. Możesz kontynuować — koszty rosną z liczbą klatek.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {kind === "image" && fluxSelected && imageLimitsNote ? (
           <p className="text-sm text-amber-200/70">{imageLimitsNote}</p>
         ) : null}
 
-        {videoLimitsNote ? (
-          <p className="text-sm text-amber-200/70">{videoLimitsNote}</p>
-        ) : null}
-
-        {error ? (
-          <p className="text-sm text-rose-300" role="alert">
-            {error}
-          </p>
+        {error || errorDetail ? (
+          <div className="space-y-1.5 rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2.5" role="alert">
+            <p className="text-sm text-rose-200">
+              {errorDetail?.message ?? error}
+            </p>
+            {errorDetail?.hint ? (
+              <p className="text-sm text-rose-100/70">{errorDetail.hint}</p>
+            ) : null}
+            {errorDetail?.linkHref ? (
+              <a
+                href={errorDetail.linkHref}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-sm text-teal-200 underline-offset-2 hover:underline"
+              >
+                {errorDetail.linkLabel ?? errorDetail.linkHref}
+              </a>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
@@ -645,21 +749,21 @@ export function GenerateForm({
           Podgląd
         </p>
         <div className="relative min-h-[280px] overflow-hidden rounded-xl border border-dashed border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent p-4">
-          {status ? (
-            <p className="mb-3 text-sm text-stone-400">
-              Status: <span className="text-teal-200">{status}</span>
-              {promptId ? (
-                <span className="ml-2 font-mono text-xs text-stone-600">
-                  {promptId.slice(0, 8)}…
-                </span>
-              ) : null}
-            </p>
+          {status || pending ? (
+            <GenerationProgressPanel
+              status={status}
+              promptId={promptId}
+              progress={jobProgress}
+              nodesTotalHint={nodesTotalHint}
+              startedAtMs={startedAtMs}
+              nowMs={nowMs}
+            />
           ) : (
             <p className="text-sm text-stone-500">
               Wynik pojawi się tutaj po zakończeniu joba w ComfyUI.
             </p>
           )}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {outputs.map((o) => {
               const src = `/api/comfy-view?filename=${encodeURIComponent(o.filename)}&subfolder=${encodeURIComponent(o.subfolder)}&type=${encodeURIComponent(o.type)}`;
               const isVideo = /\.(mp4|webm|mov)$/i.test(o.filename);
@@ -709,5 +813,120 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`;
+}
+
+function GenerationProgressPanel({
+  status,
+  promptId,
+  progress,
+  nodesTotalHint,
+  startedAtMs,
+  nowMs,
+}: {
+  status: string | null;
+  promptId: string | null;
+  progress: JobProgress | null;
+  nodesTotalHint: number | null;
+  startedAtMs: number | null;
+  nowMs: number;
+}) {
+  const nodesTotal = progress?.nodesTotal ?? nodesTotalHint;
+  const nodesDone = progress?.nodesDone;
+  const start =
+    progress?.executionStartMs && progress.executionStartMs > 1e11
+      ? progress.executionStartMs
+      : startedAtMs;
+  const elapsed = start ? nowMs - start : null;
+
+  let percent = progress?.percent;
+  if (percent == null && status === "queued") percent = 8;
+  if (percent == null && status === "running") {
+    percent =
+      nodesTotal && nodesDone != null
+        ? Math.min(95, Math.round((nodesDone / nodesTotal) * 100))
+        : elapsed != null
+          ? Math.min(85, 15 + Math.floor(elapsed / 1000))
+          : null;
+  }
+  if (status === "completed") percent = 100;
+  if (status === "failed") percent = 100;
+
+  const indeterminate =
+    percent == null && (status === "running" || status === "queued");
+  const width = percent != null ? `${percent}%` : indeterminate ? "40%" : "0%";
+
+  return (
+    <div className="mb-3 space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm text-stone-400">
+          Status:{" "}
+          <span className="text-teal-200">
+            {progress?.phase || status || "…"}
+          </span>
+          {status && progress?.phase && status !== progress.phase ? (
+            <span className="ml-1 text-stone-600">({status})</span>
+          ) : null}
+        </p>
+        <p className="font-mono text-xs text-stone-500">
+          {percent != null ? `${percent}%` : "…"}
+          {elapsed != null ? ` · ${formatElapsed(elapsed)}` : null}
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+        <div
+          className={[
+            "h-full rounded-full bg-teal-400 transition-[width] duration-500",
+            indeterminate ? "animate-pulse" : "",
+            status === "failed" ? "bg-rose-400" : "",
+          ].join(" ")}
+          style={{ width }}
+        />
+      </div>
+      <dl className="grid gap-1 text-[11px] text-stone-500 sm:grid-cols-2">
+        {promptId ? (
+          <div>
+            <dt className="inline text-stone-600">prompt_id · </dt>
+            <dd className="inline font-mono text-stone-400">{promptId}</dd>
+          </div>
+        ) : null}
+        {nodesTotal != null ? (
+          <div>
+            <dt className="inline text-stone-600">nody · </dt>
+            <dd className="inline font-mono text-stone-400">
+              {nodesDone != null ? `${nodesDone}/` : ""}
+              {nodesTotal}
+            </dd>
+          </div>
+        ) : null}
+        {progress?.currentNodeId || progress?.currentNodeType ? (
+          <div className="sm:col-span-2">
+            <dt className="inline text-stone-600">node · </dt>
+            <dd className="inline font-mono text-stone-400">
+              {progress.currentNodeType ?? "?"}
+              {progress.currentNodeId ? ` (#${progress.currentNodeId})` : ""}
+            </dd>
+          </div>
+        ) : null}
+        {progress && (progress.queuePending > 0 || progress.queueRunning) ? (
+          <div>
+            <dt className="inline text-stone-600">kolejka · </dt>
+            <dd className="inline text-stone-400">
+              {progress.queueRunning ? "running" : "pending"}
+              {progress.queuePending > 0
+                ? ` · pending ${progress.queuePending}`
+                : ""}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </div>
   );
 }

@@ -1,3 +1,4 @@
+import { friendlyComfyError, formatFriendlyErrorLines } from "./comfy-errors";
 import { getComfyUrl } from "./config";
 import type { ComfyHealth } from "./types";
 
@@ -61,7 +62,12 @@ export async function checkComfyHealth(): Promise<ComfyHealth> {
 export async function enqueuePrompt(
   workflow: Record<string, unknown>,
   clientId = "aigen"
-): Promise<{ promptId: string; number: number; nodeErrors: unknown }> {
+): Promise<{
+  promptId: string;
+  number: number;
+  nodeErrors: unknown;
+  nodesTotal: number;
+}> {
   const res = await fetchComfy("/prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -74,19 +80,32 @@ export async function enqueuePrompt(
     node_errors?: unknown;
     error?: unknown;
   };
+  const nodesTotal = Object.keys(workflow).filter((k) => k !== "_meta").length;
+
   if (!res.ok || !data.prompt_id) {
-    const message =
-      typeof data.error === "string"
-        ? data.error
-        : data.error
-          ? JSON.stringify(data.error)
-          : `ComfyUI prompt failed (${res.status})`;
-    throw new Error(message);
+    const friendly = friendlyComfyError(data.error ?? data.node_errors ?? data);
+    const err = new Error(formatFriendlyErrorLines(friendly));
+    (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
+      friendly;
+    throw err;
   }
+
+  if (data.node_errors && typeof data.node_errors === "object") {
+    const keys = Object.keys(data.node_errors as object);
+    if (keys.length > 0) {
+      const friendly = friendlyComfyError(data.node_errors);
+      const err = new Error(formatFriendlyErrorLines(friendly));
+      (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
+        friendly;
+      throw err;
+    }
+  }
+
   return {
     promptId: data.prompt_id,
     number: data.number ?? 0,
     nodeErrors: data.node_errors ?? null,
+    nodesTotal,
   };
 }
 
@@ -105,6 +124,23 @@ export async function getHistory(promptId?: string): Promise<unknown> {
   return res.json();
 }
 
+export type JobProgress = {
+  /** 0–100; null = nieznany / indeterminate */
+  percent: number | null;
+  phase: string;
+  queuePending: number;
+  queueRunning: boolean;
+  currentNodeId: string | null;
+  currentNodeType: string | null;
+  nodesDone: number | null;
+  nodesTotal: number | null;
+  executionStartMs: number | null;
+  errorMessage: string | null;
+  errorHint: string | null;
+  errorLinkHref: string | null;
+  errorLinkLabel: string | null;
+};
+
 export type JobStatus = {
   promptId: string;
   status: "queued" | "running" | "completed" | "failed" | "unknown";
@@ -113,8 +149,28 @@ export type JobStatus = {
     subfolder: string;
     type: string;
   }>;
+  progress: JobProgress;
   raw?: unknown;
 };
+
+function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
+  return {
+    percent: null,
+    phase: "nieznany",
+    queuePending: 0,
+    queueRunning: false,
+    currentNodeId: null,
+    currentNodeType: null,
+    nodesDone: null,
+    nodesTotal: null,
+    executionStartMs: null,
+    errorMessage: null,
+    errorHint: null,
+    errorLinkHref: null,
+    errorLinkLabel: null,
+    ...partial,
+  };
+}
 
 function extractOutputs(entry: unknown): JobStatus["outputs"] {
   if (!entry || typeof entry !== "object") return [];
@@ -148,48 +204,235 @@ function extractOutputs(entry: unknown): JobStatus["outputs"] {
   return list;
 }
 
-export async function getJobStatus(promptId: string): Promise<JobStatus> {
-  try {
-    const history = (await getHistory(promptId)) as Record<string, unknown>;
-    const entry = history[promptId];
-    if (entry) {
-      const statusMeta = (entry as { status?: { status_str?: string; completed?: boolean } })
-        .status;
-      const completed = statusMeta?.completed === true || Boolean(entry);
-      const failed = statusMeta?.status_str === "error";
-      return {
-        promptId,
-        status: failed ? "failed" : completed ? "completed" : "running",
-        outputs: extractOutputs(entry),
-        raw: entry,
+function workflowNodeCount(promptObj: unknown): number | null {
+  if (!promptObj || typeof promptObj !== "object") return null;
+  // queue row item may be { prompt: workflow } or the workflow itself
+  const rec = promptObj as Record<string, unknown>;
+  const wf =
+    rec.prompt && typeof rec.prompt === "object"
+      ? (rec.prompt as Record<string, unknown>)
+      : rec;
+  const keys = Object.keys(wf).filter((k) => k !== "_meta");
+  return keys.length > 0 ? keys.length : null;
+}
+
+function classTypeFromWorkflow(
+  promptObj: unknown,
+  nodeId: string | null
+): string | null {
+  if (!nodeId || !promptObj || typeof promptObj !== "object") return null;
+  const rec = promptObj as Record<string, unknown>;
+  const wf =
+    rec.prompt && typeof rec.prompt === "object"
+      ? (rec.prompt as Record<string, unknown>)
+      : rec;
+  const node = wf[nodeId];
+  if (!node || typeof node !== "object") return null;
+  const ct = (node as { class_type?: string }).class_type;
+  return ct ?? null;
+}
+
+function parseHistoryProgress(entry: unknown): {
+  failed: boolean;
+  completed: boolean;
+  executionStartMs: number | null;
+  nodesDone: number | null;
+  errorRaw: unknown;
+} {
+  const statusMeta = (
+    entry as {
+      status?: {
+        status_str?: string;
+        completed?: boolean;
+        messages?: unknown[];
       };
     }
-  } catch {
-    // fall through to queue
+  ).status;
+  const failed = statusMeta?.status_str === "error";
+  const completed = statusMeta?.completed === true || (!failed && Boolean(entry));
+  let executionStartMs: number | null = null;
+  let nodesDone: number | null = null;
+  let errorRaw: unknown = null;
+  const messages = statusMeta?.messages;
+  if (Array.isArray(messages)) {
+    const doneNodes = new Set<string>();
+    for (const msg of messages) {
+      if (!Array.isArray(msg) || msg.length < 2) continue;
+      const type = String(msg[0]);
+      const data = msg[1] as Record<string, unknown> | undefined;
+      if (type === "execution_start" && data?.timestamp != null) {
+        executionStartMs = Number(data.timestamp) * (Number(data.timestamp) < 1e12 ? 1000 : 1);
+      }
+      if (type === "execution_cached" && Array.isArray(data?.nodes)) {
+        for (const n of data.nodes) doneNodes.add(String(n));
+      }
+      if (type === "executing" && data?.node != null) {
+        doneNodes.add(String(data.node));
+      }
+      if (type === "execution_error") {
+        errorRaw = data ?? msg;
+      }
+    }
+    if (doneNodes.size > 0) nodesDone = doneNodes.size;
   }
+  return { failed, completed, executionStartMs, nodesDone, errorRaw };
+}
+
+export async function getJobStatus(promptId: string): Promise<JobStatus> {
+  let queuePending = 0;
+  let queueRunning = false;
+  let runningPrompt: unknown = null;
+  let pendingIndex = -1;
 
   try {
     const queue = (await getQueue()) as {
       queue_running?: unknown[][];
       queue_pending?: unknown[][];
     };
-    const inRunning = (queue.queue_running ?? []).some(
-      (row) => Array.isArray(row) && row[1] === promptId
-    );
-    const inPending = (queue.queue_pending ?? []).some(
-      (row) => Array.isArray(row) && row[1] === promptId
-    );
-    if (inRunning) {
-      return { promptId, status: "running", outputs: [] };
+    const running = queue.queue_running ?? [];
+    const pending = queue.queue_pending ?? [];
+    queuePending = pending.length;
+    for (const row of running) {
+      if (Array.isArray(row) && row[1] === promptId) {
+        queueRunning = true;
+        runningPrompt = row[2] ?? null;
+      }
     }
-    if (inPending) {
-      return { promptId, status: "queued", outputs: [] };
-    }
+    pending.forEach((row, i) => {
+      if (Array.isArray(row) && row[1] === promptId) pendingIndex = i;
+    });
   } catch {
-    // ignore
+    // ignore queue errors
   }
 
-  return { promptId, status: "unknown", outputs: [] };
+  try {
+    const history = (await getHistory(promptId)) as Record<string, unknown>;
+    const entry = history[promptId];
+    if (entry) {
+      const parsed = parseHistoryProgress(entry);
+      const outputs = extractOutputs(entry);
+      const promptWf =
+        (entry as { prompt?: unknown[] }).prompt?.[2] ??
+        (entry as { prompt?: unknown }).prompt ??
+        null;
+      const nodesTotal = workflowNodeCount(promptWf);
+      const nodesDone =
+        parsed.nodesDone ??
+        (parsed.completed && nodesTotal != null ? nodesTotal : parsed.nodesDone);
+
+      if (parsed.failed) {
+        const friendly = friendlyComfyError(parsed.errorRaw ?? entry);
+        return {
+          promptId,
+          status: "failed",
+          outputs,
+          progress: emptyProgress({
+            percent: 100,
+            phase: "błąd",
+            queuePending,
+            queueRunning: false,
+            nodesDone,
+            nodesTotal,
+            executionStartMs: parsed.executionStartMs,
+            errorMessage: friendly.message,
+            errorHint: friendly.hint ?? null,
+            errorLinkHref: friendly.linkHref ?? null,
+            errorLinkLabel: friendly.linkLabel ?? null,
+          }),
+          raw: entry,
+        };
+      }
+
+      if (parsed.completed) {
+        return {
+          promptId,
+          status: "completed",
+          outputs,
+          progress: emptyProgress({
+            percent: 100,
+            phase: "gotowe",
+            queuePending,
+            queueRunning: false,
+            nodesDone: nodesTotal,
+            nodesTotal,
+            executionStartMs: parsed.executionStartMs,
+          }),
+          raw: entry,
+        };
+      }
+
+      // W historii, ale jeszcze nie completed — rzadkie
+      const pct =
+        nodesTotal && nodesDone != null
+          ? Math.min(95, Math.round((nodesDone / nodesTotal) * 100))
+          : 40;
+      return {
+        promptId,
+        status: "running",
+        outputs,
+        progress: emptyProgress({
+          percent: pct,
+          phase: "w trakcie",
+          queuePending,
+          queueRunning: true,
+          nodesDone,
+          nodesTotal,
+          executionStartMs: parsed.executionStartMs,
+        }),
+        raw: entry,
+      };
+    }
+  } catch {
+    // fall through to queue-only
+  }
+
+  if (queueRunning) {
+    const nodesTotal = workflowNodeCount(runningPrompt);
+    return {
+      promptId,
+      status: "running",
+      outputs: [],
+      progress: emptyProgress({
+        percent: nodesTotal ? 25 : null,
+        phase: "uruchomione w ComfyUI",
+        queuePending,
+        queueRunning: true,
+        currentNodeId: null,
+        currentNodeType: classTypeFromWorkflow(runningPrompt, null),
+        nodesTotal,
+      }),
+    };
+  }
+
+  if (pendingIndex >= 0) {
+    const ahead = pendingIndex;
+    const percent = Math.max(2, Math.min(20, 5 + ahead * 0));
+    return {
+      promptId,
+      status: "queued",
+      outputs: [],
+      progress: emptyProgress({
+        percent,
+        phase:
+          ahead === 0
+            ? "w kolejce (następny)"
+            : `w kolejce (przed Tobą: ${ahead})`,
+        queuePending,
+        queueRunning: false,
+      }),
+    };
+  }
+
+  return {
+    promptId,
+    status: "unknown",
+    outputs: [],
+    progress: emptyProgress({
+      percent: null,
+      phase: "oczekiwanie na status…",
+      queuePending,
+    }),
+  };
 }
 
 /** URL do podglądu pliku przez ComfyUI /view (serwer→serwer lub proxy). */
