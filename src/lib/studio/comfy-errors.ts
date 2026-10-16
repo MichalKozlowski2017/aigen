@@ -93,12 +93,26 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
     };
   }
 
+  if (
+    /CLIP.*CLIP_VISION|CLIP_VISION.*CLIP|received_type\(CLIP\).*CLIP_VISION/i.test(
+      blob
+    )
+  ) {
+    return {
+      code: "svd_loader_mismatch",
+      message:
+        "SVD wymaga ImageOnlyCheckpointLoader (CLIP_VISION) — nie CheckpointLoaderSimple (CLIP).",
+      hint: "Panel używa ImageOnlyCheckpointLoader w txt2video-svd. Zrestartuj / zaktualizuj deploy jeśli widzisz ten błąd.",
+    };
+  }
+
   if (/return type mismatch|received_type.*mismatch/i.test(blob)) {
     return {
       code: "type_mismatch",
       message: "Niezgodność typów połączeń w workflow Comfy.",
-      hint: extractDetailSnippet(blob) ||
-        "Sprawdź czy checkpoint SVD wystawia CLIP_VISION, a VHS przyjmuje frame_rate (INT/FLOAT).",
+      hint:
+        extractDetailSnippet(blob) ||
+        "Sprawdź połączenia node’ów (np. CLIP vs CLIP_VISION, frame_rate INT/FLOAT).",
     };
   }
 
