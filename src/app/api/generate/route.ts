@@ -5,9 +5,10 @@ import {
   friendlyComfyError,
   formatFriendlyErrorLines,
 } from "@/lib/studio/comfy-errors";
+import { ensureStartImageInComfyInput } from "@/lib/studio/ensure-start-image";
 import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
-import { buildWorkflow } from "@/lib/studio/workflow-builder";
+import { buildWorkflow, planSvdVideo } from "@/lib/studio/workflow-builder";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    let startImage = parsed.data.startImage?.trim();
+    let copiedFromOutput = false;
+    if (parsed.data.kind === "video" && startImage) {
+      const ensured = await ensureStartImageInComfyInput(startImage);
+      startImage = ensured.startImage;
+      copiedFromOutput = ensured.copiedFromOutput;
+    }
+
     const boost = await preparePromptForModel({
       prompt: parsed.data.prompt,
       negativePrompt: parsed.data.negativePrompt,
@@ -59,7 +68,11 @@ export async function POST(request: Request) {
       ...parsed.data,
       prompt: boost.modelPrompt,
       negativePrompt: boost.modelNegative,
+      startImage,
     };
+
+    const videoPlan =
+      parsed.data.kind === "video" ? planSvdVideo(bodyForComfy) : null;
 
     const { workflow, template, engine } = buildWorkflow(bodyForComfy);
     const result = await enqueuePrompt(workflow);
@@ -72,6 +85,9 @@ export async function POST(request: Request) {
       kind: parsed.data.kind,
       nodesTotal: result.nodesTotal,
       nodeErrors: result.nodeErrors,
+      startImage,
+      copiedFromOutput,
+      videoPlan,
       modelPrompt: boost.modelPrompt,
       modelNegative: boost.modelNegative,
       promptBoost: {

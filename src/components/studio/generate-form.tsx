@@ -88,7 +88,7 @@ export function GenerateForm({
     kind === "video" &&
     (durationSec > VIDEO_UI_LIMITS.comfortDurationSec ||
       fps > VIDEO_UI_LIMITS.comfortFps ||
-      videoFrames > 48);
+      videoFrames > VIDEO_UI_LIMITS.comfortFrames);
 
   useEffect(() => {
     return () => {
@@ -692,11 +692,17 @@ export function GenerateForm({
                 <span className="text-stone-500"> · {videoLimitsNote}</span>
               ) : null}
             </p>
+            <p className="text-stone-500">
+              Start frame musi być w Comfy <code className="text-stone-400">input</code>{" "}
+              — upload albo „Z galerii” (sama nazwa z output często powoduje błąd
+              walidacji LoadImage).
+            </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
-                Uwaga VRAM (~16 GB): powyżej ~{VIDEO_UI_LIMITS.comfortDurationSec}–
-                8 s lub wysokiego FPS SVD XT często kończy się OOM albo bardzo długą
-                generacją. Możesz kontynuować — koszty rosną z liczbą klatek.
+                Uwaga VRAM (~16 GB): powyżej ~{VIDEO_UI_LIMITS.comfortFrames} klatek /
+                ~{VIDEO_UI_LIMITS.comfortDurationSec}–8 s SVD XT często kończy się OOM
+                albo bardzo długą generacją. Schema Comfy pozwala więcej (do{" "}
+                {VIDEO_UI_LIMITS.schemaMaxFrames}) — koszty rosną z liczbą klatek.
               </p>
             ) : null}
           </div>
