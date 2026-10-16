@@ -132,20 +132,77 @@ export const VIDEO_UI_LIMITS = {
   maxWidth: 576,
   maxHeight: 576,
   maxFps: 30,
+  /** Schema Comfy: video_frames 1–4096; poniżej = miękkie ostrzeżenie VRAM, nie hard-block */
+  schemaMaxFrames: 4096,
+  minFramesSvd: 1,
   /** Powyżej tego zwykle OOM / bardzo długo na SVD XT 16GB */
   comfortDurationSec: 4,
   comfortFps: 12,
-  note: "Wymaga SVD + Video Helper Suite (VHS). Obraz startowy: upload, galeria albo nazwa w Comfy input. Na ~16 GB VRAM SVD XT realistycznie ~2–8 s — dłuższe klipy / wysoki FPS mogą OOM albo trwać bardzo długo.",
+  comfortFrames: 25,
+  note: "Wymaga SVD + Video Helper Suite (VHS). Obraz startowy musi być w Comfy input (upload / Z galerii) — sama nazwa z output nie przejdzie walidacji LoadImage. Na ~16 GB VRAM realistycznie krótki klip (~25 klatek).",
 } as const;
 
-/** Szacunkowa liczba klatek = czas × FPS (minimum 8 jak w builderze). */
+/** Liczba klatek = czas × FPS (integer, jak wymaga SVD). */
 export function estimateVideoFrames(durationSec: number, fps: number): number {
-  return Math.max(8, Math.round(durationSec * fps));
+  return Math.max(
+    VIDEO_UI_LIMITS.minFramesSvd,
+    Math.round(durationSec * fps)
+  );
+}
+
+export type SvdVideoPlan = {
+  width: number;
+  height: number;
+  fps: number;
+  durationSec: number;
+  frames: number;
+  vramRisky: boolean;
+};
+
+export function planSvdVideo(body: {
+  width?: number;
+  height?: number;
+  fps?: number;
+  durationSec?: number;
+}): SvdVideoPlan {
+  // width/height: step 8 (wymóg SVD_img2vid_Conditioning)
+  const width =
+    Math.round(
+      Math.min(body.width ?? 512, VIDEO_UI_LIMITS.maxWidth) / 8
+    ) * 8;
+  const height =
+    Math.round(
+      Math.min(body.height ?? 512, VIDEO_UI_LIMITS.maxHeight) / 8
+    ) * 8;
+  const fps = Math.min(
+    Math.max(Math.round(body.fps ?? 6), 1),
+    VIDEO_UI_LIMITS.maxFps
+  );
+  const durationSec = Math.min(
+    Math.max(body.durationSec ?? 2, 1),
+    VIDEO_UI_LIMITS.maxDurationSec
+  );
+  const frames = Math.min(
+    estimateVideoFrames(durationSec, fps),
+    VIDEO_UI_LIMITS.schemaMaxFrames
+  );
+
+  return {
+    width: Math.max(16, width),
+    height: Math.max(16, height),
+    fps,
+    durationSec,
+    frames,
+    vramRisky:
+      frames > VIDEO_UI_LIMITS.comfortFrames ||
+      durationSec > VIDEO_UI_LIMITS.comfortDurationSec ||
+      fps > VIDEO_UI_LIMITS.comfortFps,
+  };
 }
 
 /**
- * SVD img2vid — UI pozwala do 60s / 30 FPS; na ~16 GB VRAM realistycznie krótkie klipy.
- * Wymaga obrazu startowego w ComfyUI input oraz Video Helper Suite (VHS_VideoCombine).
+ * SVD img2vid — LoadImage musi dostać plik z **input**.
+ * video_frames/fps jako INT; width/height wielokrotność 8.
  */
 function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2videoTemplate);
@@ -155,28 +212,20 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
       ? Math.floor(Math.random() * 2_147_483_647)
       : body.seed;
 
-  const width = Math.min(body.width ?? 512, VIDEO_UI_LIMITS.maxWidth);
-  const height = Math.min(body.height ?? 512, VIDEO_UI_LIMITS.maxHeight);
-  const fps = Math.min(
-    Math.max(body.fps ?? 6, 1),
-    VIDEO_UI_LIMITS.maxFps
-  );
-  const durationSec = Math.min(
-    Math.max(body.durationSec ?? 2, 1),
-    VIDEO_UI_LIMITS.maxDurationSec
-  );
-  const frames = estimateVideoFrames(durationSec, fps);
+  const plan = planSvdVideo(body);
 
   graph["1"].inputs.ckpt_name = ckpt;
   graph["2"].inputs.image = body.startImage?.trim() || "start.png";
-  graph["3"].inputs.width = width;
-  graph["3"].inputs.height = height;
-  graph["3"].inputs.video_frames = frames;
-  graph["3"].inputs.fps = fps;
+  graph["3"].inputs.width = plan.width;
+  graph["3"].inputs.height = plan.height;
+  graph["3"].inputs.video_frames = plan.frames;
+  graph["3"].inputs.fps = plan.fps;
+  graph["3"].inputs.motion_bucket_id = 127;
+  graph["3"].inputs.augmentation_level = 0;
   graph["4"].inputs.seed = seed;
   graph["4"].inputs.steps = body.steps ?? 20;
   graph["4"].inputs.cfg = body.cfg ?? 2.5;
-  graph["6"].inputs.frame_rate = fps;
+  graph["6"].inputs.frame_rate = plan.fps;
 
   return graph;
 }

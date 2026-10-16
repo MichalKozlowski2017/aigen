@@ -82,8 +82,16 @@ export async function enqueuePrompt(
   };
   const nodesTotal = Object.keys(workflow).filter((k) => k !== "_meta").length;
 
+  // Zawsze łącz error + node_errors — sam komunikat top-level bywa
+  // tylko „Prompt outputs failed validation” bez szczegółów pól.
+  const errorPayload = {
+    error: data.error,
+    node_errors: data.node_errors,
+    httpStatus: res.status,
+  };
+
   if (!res.ok || !data.prompt_id) {
-    const friendly = friendlyComfyError(data.error ?? data.node_errors ?? data);
+    const friendly = friendlyComfyError(errorPayload);
     const err = new Error(formatFriendlyErrorLines(friendly));
     (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
       friendly;
@@ -93,7 +101,7 @@ export async function enqueuePrompt(
   if (data.node_errors && typeof data.node_errors === "object") {
     const keys = Object.keys(data.node_errors as object);
     if (keys.length > 0) {
-      const friendly = friendlyComfyError(data.node_errors);
+      const friendly = friendlyComfyError(errorPayload);
       const err = new Error(formatFriendlyErrorLines(friendly));
       (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
         friendly;

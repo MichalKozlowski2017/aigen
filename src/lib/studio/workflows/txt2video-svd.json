@@ -1,10 +1,10 @@
 {
   "_meta": {
     "title": "Studio text/image-to-video (SVD img2vid)",
-    "notes": "Wymaga checkpointu SVD (np. svd_xt.safetensors) w models/checkpoints oraz obrazu startowego w ComfyUI input (upload z panelu /api/upload → LoadImage)."
+    "notes": "Wymaga ImageOnlyCheckpointLoader (CLIP_VISION, nie CheckpointLoaderSimple/CLIP) + svd_xt.safetensors w checkpoints oraz obrazu startowego w ComfyUI input (upload / Z galerii)."
   },
   "1": {
-    "class_type": "CheckpointLoaderSimple",
+    "class_type": "ImageOnlyCheckpointLoader",
     "inputs": {
       "ckpt_name": "svd_xt.safetensors"
     }
