@@ -11,11 +11,33 @@ import {
   getFluxWeightDtype,
   isFluxModel,
 } from "./flux";
+import {
+  DEFAULT_CODEFORMER,
+  DEFAULT_LTX_CHECKPOINT,
+  DEFAULT_LTX_CLIP,
+  DEFAULT_VIDEO_ENGINE,
+  LTX_UI_LIMITS,
+  SVD_UI_LIMITS,
+  snapLtxLength,
+  type VideoEngineId,
+} from "./video-engines";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
-import txt2videoTemplate from "./workflows/txt2video-svd.json";
+import txt2videoLtxTemplate from "./workflows/txt2video-ltx.json";
+import txt2videoSvdTemplate from "./workflows/txt2video-svd.json";
 
 export { DEFAULT_SDXL_NEGATIVE } from "./defaults";
+export {
+  DEFAULT_VIDEO_ENGINE,
+  DEFAULT_LTX_CHECKPOINT,
+  DEFAULT_LTX_CLIP,
+  DEFAULT_CODEFORMER,
+  LTX_UI_LIMITS,
+  SVD_UI_LIMITS,
+  VIDEO_ENGINE_OPTIONS,
+  snapLtxLength,
+  type VideoEngineId,
+} from "./video-engines";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -34,15 +56,28 @@ function asGraph(raw: unknown): WorkflowGraph {
   return clone as WorkflowGraph;
 }
 
+function imageBasename(raw: string | undefined): string {
+  const v = raw?.trim() || "start.png";
+  return v.includes("/") ? v.slice(v.lastIndexOf("/") + 1) : v;
+}
+
 /** Buduje workflow ComfyUI API z pól formularza. */
 export function buildWorkflow(body: GenerateBody): {
   workflow: WorkflowGraph;
   template: string;
-  engine: "flux" | "sdxl" | "svd";
+  engine: "flux" | "sdxl" | "svd" | "ltx";
 } {
   if (body.kind === "video") {
+    const engine = resolveVideoEngine(body);
+    if (engine === "ltx") {
+      return {
+        workflow: buildLtxVideoWorkflow(body),
+        template: "txt2video-ltx",
+        engine: "ltx",
+      };
+    }
     return {
-      workflow: buildVideoWorkflow(body),
+      workflow: buildSvdVideoWorkflow(body),
       template: "txt2video-svd",
       engine: "svd",
     };
@@ -61,11 +96,22 @@ export function buildWorkflow(body: GenerateBody): {
   };
 }
 
+export function resolveVideoEngine(body: {
+  videoEngine?: string;
+  model?: string;
+}): VideoEngineId {
+  if (body.videoEngine === "svd" || body.videoEngine === "ltx") {
+    return body.videoEngine;
+  }
+  const m = body.model?.toLowerCase() ?? "";
+  if (m.includes("svd")) return "svd";
+  if (m.includes("ltx")) return "ltx";
+  return DEFAULT_VIDEO_ENGINE;
+}
+
 /**
  * Flux.2 Dev (fp8): UNETLoader + CLIPLoader(type=flux2) + VAE + FluxGuidance
  * + Flux2Scheduler + EmptyFlux2LatentImage + SamplerCustomAdvanced.
- * Uproszczone względem blueprintu (bez turbo LoRA / ComfySwitch).
- * Negatyw klasyczny nie jest używany.
  */
 function buildFluxImageWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2imgFluxTemplate);
@@ -127,30 +173,21 @@ function buildSdxlImageWorkflow(body: GenerateBody): WorkflowGraph {
   return graph;
 }
 
+/** @deprecated użyj SVD_UI_LIMITS / LTX_UI_LIMITS — zostawione dla starych importów */
 export const VIDEO_UI_LIMITS = {
-  maxDurationSec: 60,
-  maxWidth: 576,
-  maxHeight: 576,
-  maxFps: 30,
-  /** Schema Comfy: video_frames 1–4096; poniżej = miękkie ostrzeżenie VRAM, nie hard-block */
-  schemaMaxFrames: 4096,
-  minFramesSvd: 1,
-  /** Powyżej tego zwykle OOM / bardzo długo na SVD XT 16GB */
-  comfortDurationSec: 4,
-  comfortFps: 12,
-  comfortFrames: 25,
-  note: "Wymaga SVD + Video Helper Suite (VHS). Obraz startowy musi być w Comfy input (upload / Z galerii) — sama nazwa z output nie przejdzie walidacji LoadImage. Na ~16 GB VRAM realistycznie krótki klip (~25 klatek).",
+  ...SVD_UI_LIMITS,
+  schemaMaxFrames: SVD_UI_LIMITS.schemaMaxFrames,
+  minFramesSvd: SVD_UI_LIMITS.minFrames,
+  comfortFrames: SVD_UI_LIMITS.comfortFrames,
+  note: `${LTX_UI_LIMITS.note} ${SVD_UI_LIMITS.note}`,
 } as const;
 
-/** Liczba klatek = czas × FPS (integer, jak wymaga SVD). */
 export function estimateVideoFrames(durationSec: number, fps: number): number {
-  return Math.max(
-    VIDEO_UI_LIMITS.minFramesSvd,
-    Math.round(durationSec * fps)
-  );
+  return Math.max(1, Math.round(durationSec * fps));
 }
 
-export type SvdVideoPlan = {
+export type VideoPlan = {
+  engine: VideoEngineId;
   width: number;
   height: number;
   fps: number;
@@ -159,57 +196,108 @@ export type SvdVideoPlan = {
   vramRisky: boolean;
 };
 
+export type SvdVideoPlan = VideoPlan;
+
+export function planVideo(body: {
+  videoEngine?: string;
+  model?: string;
+  width?: number;
+  height?: number;
+  fps?: number;
+  durationSec?: number;
+}): VideoPlan {
+  const engine = resolveVideoEngine(body);
+  return engine === "ltx" ? planLtxVideo(body) : planSvdVideo(body);
+}
+
 export function planSvdVideo(body: {
   width?: number;
   height?: number;
   fps?: number;
   durationSec?: number;
-}): SvdVideoPlan {
-  // width/height: step 8 (wymóg SVD_img2vid_Conditioning)
+}): VideoPlan {
   const width =
     Math.round(
-      Math.min(body.width ?? 512, VIDEO_UI_LIMITS.maxWidth) / 8
+      Math.min(body.width ?? SVD_UI_LIMITS.defaultWidth, SVD_UI_LIMITS.maxWidth) /
+        8
     ) * 8;
   const height =
     Math.round(
-      Math.min(body.height ?? 512, VIDEO_UI_LIMITS.maxHeight) / 8
+      Math.min(
+        body.height ?? SVD_UI_LIMITS.defaultHeight,
+        SVD_UI_LIMITS.maxHeight
+      ) / 8
     ) * 8;
   const fps = Math.min(
-    Math.max(Math.round(body.fps ?? 6), 1),
-    VIDEO_UI_LIMITS.maxFps
+    Math.max(Math.round(body.fps ?? SVD_UI_LIMITS.defaultFps), 1),
+    SVD_UI_LIMITS.maxFps
   );
   const durationSec = Math.min(
-    Math.max(body.durationSec ?? 2, 1),
-    VIDEO_UI_LIMITS.maxDurationSec
+    Math.max(body.durationSec ?? SVD_UI_LIMITS.defaultDurationSec, 1),
+    SVD_UI_LIMITS.maxDurationSec
   );
   const frames = Math.min(
     estimateVideoFrames(durationSec, fps),
-    VIDEO_UI_LIMITS.schemaMaxFrames
+    SVD_UI_LIMITS.schemaMaxFrames
   );
 
   return {
+    engine: "svd",
     width: Math.max(16, width),
     height: Math.max(16, height),
     fps,
     durationSec,
     frames,
     vramRisky:
-      frames > VIDEO_UI_LIMITS.comfortFrames ||
-      durationSec > VIDEO_UI_LIMITS.comfortDurationSec ||
-      fps > VIDEO_UI_LIMITS.comfortFps,
+      frames > SVD_UI_LIMITS.comfortFrames ||
+      durationSec > SVD_UI_LIMITS.comfortDurationSec ||
+      fps > SVD_UI_LIMITS.comfortFps,
   };
 }
 
-/**
- * SVD img2vid — LoadImage musi dostać **basename** z Comfy input/.
- * video_frames/fps jako INT; width/height wielokrotność 8.
- *
- * WAŻNE: class_type wymuszamy w kodzie (nie tylko JSON) —
- * CheckpointLoaderSimple daje CLIP ≠ CLIP_VISION → walidacja pada
- * także po udanym uploadzie obrazu.
- */
-function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
-  const graph = asGraph(txt2videoTemplate);
+export function planLtxVideo(body: {
+  width?: number;
+  height?: number;
+  fps?: number;
+  durationSec?: number;
+}): VideoPlan {
+  const width =
+    Math.round(
+      Math.min(body.width ?? LTX_UI_LIMITS.defaultWidth, LTX_UI_LIMITS.maxWidth) /
+        32
+    ) * 32;
+  const height =
+    Math.round(
+      Math.min(
+        body.height ?? LTX_UI_LIMITS.defaultHeight,
+        LTX_UI_LIMITS.maxHeight
+      ) / 32
+    ) * 32;
+  const fps = Math.min(
+    Math.max(Math.round(body.fps ?? LTX_UI_LIMITS.defaultFps), 1),
+    LTX_UI_LIMITS.maxFps
+  );
+  const durationSec = Math.min(
+    Math.max(body.durationSec ?? LTX_UI_LIMITS.defaultDurationSec, 1),
+    LTX_UI_LIMITS.maxDurationSec
+  );
+  const frames = snapLtxLength(estimateVideoFrames(durationSec, fps));
+
+  return {
+    engine: "ltx",
+    width: Math.max(64, width),
+    height: Math.max(64, height),
+    fps,
+    durationSec,
+    frames,
+    vramRisky:
+      frames > LTX_UI_LIMITS.comfortLength ||
+      durationSec > LTX_UI_LIMITS.comfortDurationSec,
+  };
+}
+
+function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
+  const graph = asGraph(txt2videoSvdTemplate);
   const ckpt = body.model?.trim() || "svd_xt.safetensors";
   const seed =
     body.seed === undefined || body.seed < 0
@@ -217,16 +305,11 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
       : body.seed;
 
   const plan = planSvdVideo(body);
-  const rawImage = body.startImage?.trim() || "start.png";
-  // LoadImage combo = top-level input/; ścieżka z subfolderem → „Value not in list”
-  const imageBasename = rawImage.includes("/")
-    ? rawImage.slice(rawImage.lastIndexOf("/") + 1)
-    : rawImage;
 
   graph["1"].class_type = "ImageOnlyCheckpointLoader";
   graph["1"].inputs.ckpt_name = ckpt;
   graph["2"].class_type = "LoadImage";
-  graph["2"].inputs.image = imageBasename;
+  graph["2"].inputs.image = imageBasename(body.startImage);
   graph["3"].inputs.width = plan.width;
   graph["3"].inputs.height = plan.height;
   graph["3"].inputs.video_frames = plan.frames;
@@ -238,5 +321,82 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
   graph["4"].inputs.cfg = body.cfg ?? 2.5;
   graph["6"].inputs.frame_rate = plan.fps;
 
+  if (body.faceRestore) {
+    spliceFaceRestore(graph, "5", "6");
+  }
+
   return graph;
+}
+
+/**
+ * LTXV 2B I2V — CheckpointLoaderSimple + CLIPLoader(type=ltxv) + LTXVImgToVideo
+ * + SamplerCustom + VHS. Opcjonalnie CodeFormer na klatkach przed combine.
+ */
+function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
+  const graph = asGraph(txt2videoLtxTemplate);
+  const seed =
+    body.seed === undefined || body.seed < 0
+      ? Math.floor(Math.random() * 2_147_483_647)
+      : body.seed;
+
+  const plan = planLtxVideo(body);
+  const ckpt =
+    body.model?.trim() && !body.model.toLowerCase().includes("svd")
+      ? body.model.trim()
+      : DEFAULT_LTX_CHECKPOINT;
+
+  graph["10"].inputs.ckpt_name = ckpt;
+  graph["11"].inputs.clip_name = DEFAULT_LTX_CLIP;
+  graph["11"].inputs.type = "ltxv";
+  graph["12"].inputs.image = imageBasename(body.startImage);
+  graph["13"].inputs.text =
+    body.prompt?.trim() ||
+    "best quality, cinematic motion, detailed, smooth camera";
+  graph["14"].inputs.text =
+    body.negativePrompt?.trim() ||
+    "low quality, worst quality, deformed, distorted, motion smear, bad anatomy";
+  graph["15"].inputs.width = plan.width;
+  graph["15"].inputs.height = plan.height;
+  graph["15"].inputs.length = plan.frames;
+  graph["15"].inputs.strength = 1;
+  graph["16"].inputs.frame_rate = plan.fps;
+  graph["17"].inputs.steps = body.steps ?? 20;
+  graph["19"].inputs.noise_seed = seed;
+  graph["19"].inputs.cfg = body.cfg ?? 3;
+  graph["21"].inputs.frame_rate = plan.fps;
+
+  if (body.faceRestore) {
+    spliceFaceRestore(graph, "20", "21");
+  }
+
+  return graph;
+}
+
+/**
+ * Wstawia FaceRestoreModelLoader + FaceRestoreCFWithModel między decode a VHS.
+ * decodeNodeId = VAEDecode; combineNodeId = VHS_VideoCombine (pole images).
+ */
+function spliceFaceRestore(
+  graph: WorkflowGraph,
+  decodeNodeId: string,
+  combineNodeId: string
+): void {
+  graph["90"] = {
+    class_type: "FaceRestoreModelLoader",
+    inputs: {
+      model_name: DEFAULT_CODEFORMER,
+    },
+  };
+  graph["91"] = {
+    class_type: "FaceRestoreCFWithModel",
+    inputs: {
+      facerestore_model: ["90", 0],
+      image: [decodeNodeId, 0],
+      facedetection: "retinaface_resnet50",
+      codeformer_fidelity: 0.5,
+    },
+  };
+  if (graph[combineNodeId]) {
+    graph[combineNodeId].inputs.images = ["91", 0];
+  }
 }

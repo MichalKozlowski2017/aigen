@@ -1,0 +1,112 @@
+{
+  "_meta": {
+    "title": "Studio image-to-video (LTXV 2B)",
+    "notes": "Wymaga ltx-video-2b-v0.9.5 (checkpoints) + t5xxl_fp8 (text_encoders, CLIPLoader type=ltxv) + VHS. Face restore (opcjonalnie) dokleja facerestore_cf po VAEDecode."
+  },
+  "10": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "ltx-video-2b-v0.9.5.safetensors"
+    }
+  },
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "ltxv",
+      "device": "default"
+    }
+  },
+  "12": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "start.png"
+    }
+  },
+  "13": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "best quality, cinematic motion, detailed",
+      "clip": ["11", 0]
+    }
+  },
+  "14": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "low quality, worst quality, deformed, distorted, motion smear, bad anatomy",
+      "clip": ["11", 0]
+    }
+  },
+  "15": {
+    "class_type": "LTXVImgToVideo",
+    "inputs": {
+      "positive": ["13", 0],
+      "negative": ["14", 0],
+      "vae": ["10", 2],
+      "image": ["12", 0],
+      "width": 768,
+      "height": 512,
+      "length": 49,
+      "batch_size": 1,
+      "strength": 1
+    }
+  },
+  "16": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": ["15", 0],
+      "negative": ["15", 1],
+      "frame_rate": 24
+    }
+  },
+  "17": {
+    "class_type": "LTXVScheduler",
+    "inputs": {
+      "steps": 20,
+      "max_shift": 2.05,
+      "base_shift": 0.95,
+      "stretch": true,
+      "terminal": 0.1,
+      "latent": ["15", 2]
+    }
+  },
+  "18": {
+    "class_type": "KSamplerSelect",
+    "inputs": {
+      "sampler_name": "euler"
+    }
+  },
+  "19": {
+    "class_type": "SamplerCustom",
+    "inputs": {
+      "add_noise": true,
+      "noise_seed": 0,
+      "cfg": 3,
+      "model": ["10", 0],
+      "positive": ["16", 0],
+      "negative": ["16", 1],
+      "sampler": ["18", 0],
+      "sigmas": ["17", 0],
+      "latent_image": ["15", 2]
+    }
+  },
+  "20": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["19", 0],
+      "vae": ["10", 2]
+    }
+  },
+  "21": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "frame_rate": 24,
+      "loop_count": 0,
+      "filename_prefix": "studio/video-ltx",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true,
+      "images": ["20", 0]
+    }
+  }
+}
