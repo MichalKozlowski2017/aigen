@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { getHistory } from "./comfy-client";
+import { normalizeComfyMediaRef } from "./comfy-media";
 import { outputRoot, resolveOutputFile } from "./paths";
 import type { GalleryItem } from "./types";
 
@@ -89,11 +90,13 @@ function extractOutputsFromHistoryEntry(
           type?: string;
         };
         if (rec.filename) {
-          list.push({
-            filename: rec.filename,
-            subfolder: rec.subfolder ?? "",
-            type: rec.type ?? "output",
-          });
+          list.push(
+            normalizeComfyMediaRef(
+              rec.filename,
+              rec.subfolder ?? "",
+              rec.type ?? "output"
+            )
+          );
         }
       }
     }
