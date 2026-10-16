@@ -201,8 +201,12 @@ export function planSvdVideo(body: {
 }
 
 /**
- * SVD img2vid — LoadImage musi dostać plik z **input**.
+ * SVD img2vid — LoadImage musi dostać **basename** z Comfy input/.
  * video_frames/fps jako INT; width/height wielokrotność 8.
+ *
+ * WAŻNE: class_type wymuszamy w kodzie (nie tylko JSON) —
+ * CheckpointLoaderSimple daje CLIP ≠ CLIP_VISION → walidacja pada
+ * także po udanym uploadzie obrazu.
  */
 function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2videoTemplate);
@@ -213,9 +217,16 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
       : body.seed;
 
   const plan = planSvdVideo(body);
+  const rawImage = body.startImage?.trim() || "start.png";
+  // LoadImage combo = top-level input/; ścieżka z subfolderem → „Value not in list”
+  const imageBasename = rawImage.includes("/")
+    ? rawImage.slice(rawImage.lastIndexOf("/") + 1)
+    : rawImage;
 
+  graph["1"].class_type = "ImageOnlyCheckpointLoader";
   graph["1"].inputs.ckpt_name = ckpt;
-  graph["2"].inputs.image = body.startImage?.trim() || "start.png";
+  graph["2"].class_type = "LoadImage";
+  graph["2"].inputs.image = imageBasename;
   graph["3"].inputs.width = plan.width;
   graph["3"].inputs.height = plan.height;
   graph["3"].inputs.video_frames = plan.frames;

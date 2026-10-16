@@ -1,106 +1,134 @@
-import {
-  uploadImageToComfy,
-  comfyViewUrl,
-} from "./comfy-client";
+import { fetchComfyViewBlob, uploadImageToComfy } from "./comfy-client";
+
+export type StartImageSource = {
+  filename: string;
+  subfolder?: string;
+  type?: "input" | "output" | "temp" | string;
+};
 
 /**
- * LoadImage w Comfy widzi tylko pliki z katalogu **input**.
- * Nazwy z galerii / output (np. txt2img-flux2_00003_.png) często tam nie leżą
- * → VALIDATE_INPUTS: „Invalid image file” / „Prompt outputs failed validation”.
+ * LoadImage waliduje wyłącznie pliki w ComfyUI **input** (basename).
+ * Galeria / SaveImage zapisuje do **output** (np. studio/txt2img-flux2_00003_.png)
+ * → bez kopii: „Invalid image file” / „Prompt outputs failed validation”.
  *
- * Próbujemy: input → output (+ typowe subfoldery) → upload do input.
+ * Zawsze pobieramy bajty i **force-upload** do input/ (overwrite) — nie ufamy
+ * samej obecności nazwy w polu formularza.
  */
 export async function ensureStartImageInComfyInput(
-  startImage: string
-): Promise<{ startImage: string; copiedFromOutput: boolean }> {
+  startImage: string,
+  source?: StartImageSource | null
+): Promise<{ startImage: string; copiedFromOutput: boolean; sourceUsed: string }> {
   const raw = startImage.trim();
-  if (!raw) {
-    throw new Error("Brak nazwy obrazu startowego.");
+  if (!raw && !source?.filename) {
+    throw missingStartError("(puste)");
   }
 
-  const candidates: Array<{ filename: string; subfolder: string; type: string }> =
-    [];
+  const candidates = buildCandidates(raw, source);
+  let lastBlob: Blob | null = null;
+  let lastKey = "";
+  let fromOutput = false;
 
+  for (const c of candidates) {
+    const key = `${c.type}:${c.subfolder}/${c.filename}`;
+    const blob = await fetchComfyViewBlob(c.filename, c.subfolder, c.type);
+    if (!blob) continue;
+    lastBlob = blob;
+    lastKey = key;
+    fromOutput = c.type !== "input";
+    // Prefer explicit / output hits — still force-upload below
+    break;
+  }
+
+  if (!lastBlob) {
+    throw missingStartError(raw || source?.filename || "?");
+  }
+
+  const basename = sanitizeBasename(
+    source?.filename || (raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) : raw)
+  );
+
+  const uploaded = await uploadImageToComfy(lastBlob, basename, {
+    overwrite: true,
+    // Zawsze root input — LoadImage combo to top-level listdir
+  });
+
+  // Nigdy nie zwracaj ścieżki z subfolderem do LoadImage
+  const name = uploaded.name;
+  return {
+    startImage: name,
+    copiedFromOutput: fromOutput,
+    sourceUsed: lastKey,
+  };
+}
+
+function buildCandidates(
+  raw: string,
+  source?: StartImageSource | null
+): Array<{ filename: string; subfolder: string; type: string }> {
+  const out: Array<{ filename: string; subfolder: string; type: string }> = [];
   const push = (filename: string, subfolder: string, type: string) => {
-    candidates.push({ filename, subfolder, type });
+    if (!filename) return;
+    out.push({ filename, subfolder, type });
   };
 
-  // Jak podano „studio/foo.png”
+  if (source?.filename) {
+    const t = source.type || "output";
+    const sub = source.subfolder || "";
+    push(source.filename, sub, t);
+    // Also try flipped type if explicit miss
+    if (t !== "input") push(source.filename, sub, "input");
+    if (t !== "output") push(source.filename, sub, "output");
+    if (sub) {
+      push(source.filename, "", t);
+      push(source.filename, "", "output");
+      push(source.filename, "", "input");
+    }
+  }
+
   if (raw.includes("/")) {
     const i = raw.lastIndexOf("/");
     const sub = raw.slice(0, i);
     const file = raw.slice(i + 1);
-    push(file, sub, "input");
     push(file, sub, "output");
+    push(file, sub, "input");
     push(file, "", "input");
     push(file, "", "output");
-  } else {
+  } else if (raw) {
+    // Typowe prefixy SaveImage Studio: studio/txt2img-flux2_…
     push(raw, "", "input");
     push(raw, "", "output");
     push(raw, "studio", "output");
-    push(raw, "studio/txt2img-flux", "output");
-    push(raw, "studio/txt2img-flux2", "output");
+    push(raw, "studio", "input");
   }
 
+  // Dedup
   const seen = new Set<string>();
-  for (const c of candidates) {
-    const key = `${c.type}:${c.subfolder}/${c.filename}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+  return out.filter((c) => {
+    const k = `${c.type}:${c.subfolder}/${c.filename}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
 
-    const blob = await tryFetchComfyView(c.filename, c.subfolder, c.type);
-    if (!blob) continue;
+function sanitizeBasename(name: string): string {
+  const base =
+    name.replace(/[^\w.\-]+/g, "_").replace(/^\.+/, "") || "start.png";
+  return base.length > 180 ? base.slice(-180) : base;
+}
 
-    if (c.type === "input") {
-      // Już w input — użyj oryginalnej ścieżki względnej jeśli miała subfolder
-      const name = c.subfolder ? `${c.subfolder}/${c.filename}` : c.filename;
-      return { startImage: name, copiedFromOutput: false };
-    }
-
-    // Skopiuj output → input
-    const uploaded = await uploadImageToComfy(blob, c.filename, {
-      overwrite: true,
-    });
-    const name = uploaded.subfolder
-      ? `${uploaded.subfolder}/${uploaded.name}`
-      : uploaded.name;
-    return { startImage: name, copiedFromOutput: true };
-  }
-
+function missingStartError(label: string): Error {
   const err = new Error(
-    `Nie znaleziono obrazu „${raw}” w Comfy input ani output. Użyj „Z galerii” / upload — LoadImage wymaga pliku w folderze input.`
+    `Nie znaleziono obrazu „${label}” w Comfy input/output. Użyj „Z galerii” / upload.`
   );
   (
     err as Error & {
-      friendly?: {
-        message: string;
-        hint: string;
-        code: string;
-      };
+      friendly?: { message: string; hint: string; code: string };
     }
   ).friendly = {
     code: "missing_start_image",
-    message: `Obraz startowy „${raw}” nie istnieje w ComfyUI input.`,
-    hint: "Wgraj plik albo wybierz „Z galerii” (kopiujemy do input). Sama nazwa z output (np. txt2img-flux2_…) nie wystarczy.",
+    message: `Obraz startowy „${label}” nie istnieje w ComfyUI input ani output.`,
+    hint: "Wgraj plik albo „Z galerii”. Sama nazwa z output bez kopii do input powoduje „Prompt outputs failed validation” (LoadImage).",
   };
-  throw err;
-}
-
-async function tryFetchComfyView(
-  filename: string,
-  subfolder: string,
-  type: string
-): Promise<Blob | null> {
-  try {
-    const url = comfyViewUrl(filename, subfolder, type);
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    const buf = await res.arrayBuffer();
-    if (buf.byteLength < 32) return null;
-    const ct = res.headers.get("content-type") || "image/png";
-    if (ct.includes("json") || ct.includes("text")) return null;
-    return new Blob([buf], { type: ct });
-  } catch {
-    return null;
-  }
+  return err;
 }
