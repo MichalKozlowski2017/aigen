@@ -30,6 +30,10 @@ function comfyFoldersForSubdir(subdir: string): string[] {
       return ["loras"];
     case "controlnet":
       return ["controlnet"];
+    case "clip_vision":
+      return ["clip_vision"];
+    case "facerestore_models":
+      return ["facerestore_models"];
     default:
       return [subdir];
   }
@@ -210,6 +214,41 @@ export async function listInstalledCheckpoints(): Promise<string[]> {
 
   try {
     return await listComfyModelFolder("checkpoints");
+  } catch {
+    return [];
+  }
+}
+
+/** UNET / diffusion_models (Wan, Flux, …). */
+export async function listInstalledDiffusionModels(): Promise<string[]> {
+  const root = modelsRoot();
+  if (root) {
+    for (const sub of ["diffusion_models", "unet"] as const) {
+      const dir = path.join(root, sub);
+      try {
+        const names = await fs.readdir(dir);
+        const files = names.filter(
+          (n) =>
+            n.endsWith(".safetensors") ||
+            n.endsWith(".ckpt") ||
+            n.endsWith(".gguf")
+        );
+        if (files.length > 0) return files;
+      } catch {
+        /* try next */
+      }
+    }
+    return [];
+  }
+
+  try {
+    const primary = await listComfyModelFolder("diffusion_models");
+    if (primary.length > 0) return primary;
+  } catch {
+    /* fall through */
+  }
+  try {
+    return await listComfyModelFolder("unet");
   } catch {
     return [];
   }

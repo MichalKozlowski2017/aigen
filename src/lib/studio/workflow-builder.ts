@@ -16,34 +16,52 @@ import {
   DEFAULT_LTX_CHECKPOINT,
   DEFAULT_LTX_CLIP,
   DEFAULT_VIDEO_ENGINE,
+  DEFAULT_WAN_CLIP,
+  DEFAULT_WAN_CLIP_VISION,
+  DEFAULT_WAN_UNET,
+  DEFAULT_WAN_VAE,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
+  WAN_UI_LIMITS,
   effectiveDurationSec,
   maxLtxDurationAtFps,
+  maxWanDurationAtFps,
   snapLtxLength,
+  snapWanLength,
   type VideoEngineId,
 } from "./video-engines";
 import { planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
+import { planWanChunks } from "./wan-chunks";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
 import txt2videoLtxTemplate from "./workflows/txt2video-ltx.json";
 import txt2videoSvdTemplate from "./workflows/txt2video-svd.json";
+import txt2videoWanTemplate from "./workflows/txt2video-wan.json";
 
 export type { LtxChunkPlan } from "./ltx-chunks";
 export { planLtxChunks } from "./ltx-chunks";
+export { planWanChunks } from "./wan-chunks";
 
 export { DEFAULT_SDXL_NEGATIVE } from "./defaults";
 export {
   DEFAULT_VIDEO_ENGINE,
+  DEFAULT_WAN_UNET,
+  DEFAULT_WAN_CLIP,
+  DEFAULT_WAN_VAE,
+  DEFAULT_WAN_CLIP_VISION,
   DEFAULT_LTX_CHECKPOINT,
   DEFAULT_LTX_CLIP,
   DEFAULT_CODEFORMER,
+  WAN_UI_LIMITS,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  snapWanLength,
   snapLtxLength,
+  maxWanDurationAtFps,
   maxLtxDurationAtFps,
   effectiveDurationSec,
+  isChunkedVideoEngine,
   type VideoEngineId,
 } from "./video-engines";
 
@@ -73,10 +91,17 @@ function imageBasename(raw: string | undefined): string {
 export function buildWorkflow(body: GenerateBody): {
   workflow: WorkflowGraph;
   template: string;
-  engine: "flux" | "sdxl" | "svd" | "ltx";
+  engine: "flux" | "sdxl" | "svd" | "ltx" | "wan";
 } {
   if (body.kind === "video") {
     const engine = resolveVideoEngine(body);
+    if (engine === "wan") {
+      return {
+        workflow: buildWanVideoWorkflow(body),
+        template: "txt2video-wan",
+        engine: "wan",
+      };
+    }
     if (engine === "ltx") {
       return {
         workflow: buildLtxVideoWorkflow(body),
@@ -108,12 +133,17 @@ export function resolveVideoEngine(body: {
   videoEngine?: string;
   model?: string;
 }): VideoEngineId {
-  if (body.videoEngine === "svd" || body.videoEngine === "ltx") {
+  if (
+    body.videoEngine === "svd" ||
+    body.videoEngine === "ltx" ||
+    body.videoEngine === "wan"
+  ) {
     return body.videoEngine;
   }
   const m = body.model?.toLowerCase() ?? "";
   if (m.includes("svd")) return "svd";
   if (m.includes("ltx")) return "ltx";
+  if (m.includes("wan")) return "wan";
   return DEFAULT_VIDEO_ENGINE;
 }
 
@@ -181,13 +211,13 @@ function buildSdxlImageWorkflow(body: GenerateBody): WorkflowGraph {
   return graph;
 }
 
-/** @deprecated użyj SVD_UI_LIMITS / LTX_UI_LIMITS — zostawione dla starych importów */
+/** @deprecated użyj WAN/LTX/SVD_UI_LIMITS — zostawione dla starych importów */
 export const VIDEO_UI_LIMITS = {
   ...SVD_UI_LIMITS,
   schemaMaxFrames: SVD_UI_LIMITS.schemaMaxFrames,
   minFramesSvd: SVD_UI_LIMITS.minFrames,
   comfortFrames: SVD_UI_LIMITS.comfortFrames,
-  note: `${LTX_UI_LIMITS.note} ${SVD_UI_LIMITS.note}`,
+  note: `${WAN_UI_LIMITS.note} ${LTX_UI_LIMITS.note} ${SVD_UI_LIMITS.note}`,
 } as const;
 
 export function estimateVideoFrames(durationSec: number, fps: number): number {
@@ -210,7 +240,7 @@ export type VideoPlan = {
   /** Max s jednego chunka przy FPS (121/fps) — nie limituje długiego wideo */
   maxDurationAtFps: number;
   vramRisky: boolean;
-  /** Plan chunków LTX (1 = bez dzielenia) */
+  /** Plan chunków Wan/LTX (1 = bez dzielenia) */
   chunkPlan?: LtxChunkPlan;
 };
 
@@ -225,7 +255,9 @@ export function planVideo(body: {
   durationSec?: number;
 }): VideoPlan {
   const engine = resolveVideoEngine(body);
-  return engine === "ltx" ? planLtxVideo(body) : planSvdVideo(body);
+  if (engine === "wan") return planWanVideo(body);
+  if (engine === "ltx") return planLtxVideo(body);
+  return planSvdVideo(body);
 }
 
 export function planSvdVideo(body: {
@@ -276,6 +308,56 @@ export function planSvdVideo(body: {
       frames > SVD_UI_LIMITS.comfortFrames ||
       effective > SVD_UI_LIMITS.comfortDurationSec ||
       fps > SVD_UI_LIMITS.comfortFps,
+  };
+}
+
+export function planWanVideo(body: {
+  width?: number;
+  height?: number;
+  fps?: number;
+  durationSec?: number;
+}): VideoPlan {
+  const width =
+    Math.round(
+      Math.min(body.width ?? WAN_UI_LIMITS.defaultWidth, WAN_UI_LIMITS.maxWidth) /
+        16
+    ) * 16;
+  const height =
+    Math.round(
+      Math.min(
+        body.height ?? WAN_UI_LIMITS.defaultHeight,
+        WAN_UI_LIMITS.maxHeight
+      ) / 16
+    ) * 16;
+  const fps = Math.min(
+    Math.max(Math.round(body.fps ?? WAN_UI_LIMITS.defaultFps), 1),
+    WAN_UI_LIMITS.maxFps
+  );
+  const maxChunkDuration = maxWanDurationAtFps(fps);
+  const requested = Math.max(
+    body.durationSec ?? WAN_UI_LIMITS.defaultDurationSec,
+    1
+  );
+  const durationSec = Math.min(requested, WAN_UI_LIMITS.maxDurationSec);
+  const requestedFrames = estimateVideoFrames(durationSec, fps);
+  const chunkPlan = planWanChunks(requestedFrames, fps);
+  const frames = chunkPlan.totalUniqueFrames;
+  const effective = chunkPlan.effectiveDurationSec;
+
+  return {
+    engine: "wan",
+    width: Math.max(64, width),
+    height: Math.max(64, height),
+    fps,
+    durationSec,
+    effectiveDurationSec: effective,
+    frames,
+    durationClamped: requested > WAN_UI_LIMITS.maxDurationSec + 0.05,
+    maxDurationAtFps: maxChunkDuration,
+    vramRisky: chunkPlan.chunks.some(
+      (c) => c.length > WAN_UI_LIMITS.comfortLength
+    ),
+    chunkPlan,
   };
 }
 
@@ -363,6 +445,83 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
 }
 
 /**
+ * Wan 2.1 I2V — UNETLoader (FP8) + CLIPLoader(type=wan) + CLIPVision +
+ * WanImageToVideo + ModelSamplingSD3 + KSampler + VHS.
+ * Opcjonalnie CodeFormer; opcjonalnie last-frame (chunk continue).
+ */
+function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
+  const graph = asGraph(txt2videoWanTemplate);
+  const seed =
+    body.seed === undefined || body.seed < 0
+      ? Math.floor(Math.random() * 2_147_483_647)
+      : body.seed;
+
+  const plan = planWanVideo(body);
+  const chunkLength =
+    body.ltxChunkLength != null
+      ? snapWanLength(body.ltxChunkLength)
+      : plan.chunkPlan && !plan.chunkPlan.chunked
+        ? plan.chunkPlan.chunks[0]!.length
+        : snapWanLength(plan.frames);
+
+  const unet =
+    body.model?.trim() && body.model.toLowerCase().includes("wan")
+      ? body.model.trim()
+      : DEFAULT_WAN_UNET;
+
+  const chunkIdx = body.ltxChunkIndex ?? 0;
+  const prefix = `studio/video-wan-c${chunkIdx}`;
+
+  graph["37"].inputs.unet_name = unet;
+  graph["37"].inputs.weight_dtype = "default";
+  graph["38"].inputs.clip_name = DEFAULT_WAN_CLIP;
+  graph["38"].inputs.type = "wan";
+  graph["39"].inputs.vae_name = DEFAULT_WAN_VAE;
+  graph["49"].inputs.clip_name = DEFAULT_WAN_CLIP_VISION;
+  graph["52"].inputs.image = imageBasename(body.startImage);
+  graph["6"].inputs.text =
+    body.prompt?.trim() ||
+    "best quality, photorealistic motion, detailed, cinematic";
+  graph["7"].inputs.text =
+    body.negativePrompt?.trim() ||
+    "low quality, worst quality, deformed, static, blurry, subtitles, watermark, bad anatomy, motionless";
+  graph["50"].inputs.width = plan.width;
+  graph["50"].inputs.height = plan.height;
+  graph["50"].inputs.length = chunkLength;
+  graph["3"].inputs.seed = seed;
+  graph["3"].inputs.steps = body.steps ?? 20;
+  graph["3"].inputs.cfg = body.cfg ?? 6;
+  graph["21"].inputs.frame_rate = plan.fps;
+  graph["21"].inputs.filename_prefix = prefix;
+
+  let imageSourceForTail: string = "8";
+  if (body.faceRestore) {
+    spliceFaceRestore(graph, "8", "21");
+    imageSourceForTail = "91";
+  }
+
+  if (body.ltxSaveTail) {
+    graph["22"] = {
+      class_type: "ImageFromBatch",
+      inputs: {
+        image: [imageSourceForTail, 0],
+        batch_index: -1,
+        length: 1,
+      },
+    };
+    graph["23"] = {
+      class_type: "SaveImage",
+      inputs: {
+        images: ["22", 0],
+        filename_prefix: `studio/wan-tail-c${chunkIdx}`,
+      },
+    };
+  }
+
+  return graph;
+}
+
+/**
  * LTXV 2B I2V — CheckpointLoaderSimple + CLIPLoader(type=ltxv) + LTXVImgToVideo
  * + SamplerCustom + VHS. Opcjonalnie CodeFormer; opcjonalnie zapis last-frame (chunk continue).
  */
@@ -382,7 +541,9 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
         : snapLtxLength(plan.frames);
 
   const ckpt =
-    body.model?.trim() && !body.model.toLowerCase().includes("svd")
+    body.model?.trim() &&
+    !body.model.toLowerCase().includes("svd") &&
+    !body.model.toLowerCase().includes("wan")
       ? body.model.trim()
       : DEFAULT_LTX_CHECKPOINT;
 

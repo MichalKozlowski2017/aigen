@@ -13,10 +13,13 @@ export function pickChunkOutputs(outputs: MediaRef[]): {
   const videos = outputs.filter((o) => /\.(mp4|webm|mov)$/i.test(o.filename));
   const tails = outputs.filter(
     (o) =>
-      /\.(png|jpe?g|webp)$/i.test(o.filename) && /ltx-tail/i.test(o.filename)
+      /\.(png|jpe?g|webp)$/i.test(o.filename) &&
+      /(ltx-tail|wan-tail)/i.test(o.filename)
   );
   const video =
-    [...videos].reverse().find((v) => /video-ltx/i.test(v.filename)) ??
+    [...videos]
+      .reverse()
+      .find((v) => /video-(ltx|wan)/i.test(v.filename)) ??
     videos[videos.length - 1] ??
     null;
   const tail = tails[tails.length - 1] ?? null;

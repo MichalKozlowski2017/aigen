@@ -15,11 +15,17 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  WAN_UI_LIMITS,
+  isChunkedVideoEngine,
   planLtxVideo,
   planSvdVideo,
+  planWanVideo,
   type VideoEngineId,
 } from "@/lib/studio/workflow-builder";
-import { DEFAULT_LTX_CHECKPOINT } from "@/lib/studio/video-engines";
+import {
+  DEFAULT_LTX_CHECKPOINT,
+  DEFAULT_WAN_UNET,
+} from "@/lib/studio/video-engines";
 import { pickChunkOutputs } from "@/lib/studio/video-outputs";
 
 type JobOutput = {
@@ -74,20 +80,24 @@ export function GenerateForm({
   );
   const [faceRestore, setFaceRestore] = useState(false);
   const videoLimits =
-    videoEngine === "ltx" ? LTX_UI_LIMITS : SVD_UI_LIMITS;
+    videoEngine === "wan"
+      ? WAN_UI_LIMITS
+      : videoEngine === "ltx"
+        ? LTX_UI_LIMITS
+        : SVD_UI_LIMITS;
   const [width, setWidth] = useState<number>(
-    kind === "video" ? LTX_UI_LIMITS.defaultWidth : 1024
+    kind === "video" ? WAN_UI_LIMITS.defaultWidth : 1024
   );
   const [height, setHeight] = useState<number>(
-    kind === "video" ? LTX_UI_LIMITS.defaultHeight : 1024
+    kind === "video" ? WAN_UI_LIMITS.defaultHeight : 1024
   );
   const [seed, setSeed] = useState(-1);
   const [batch, setBatch] = useState(1);
   const [durationSec, setDurationSec] = useState<number>(
-    kind === "video" ? LTX_UI_LIMITS.defaultDurationSec : 2
+    kind === "video" ? WAN_UI_LIMITS.defaultDurationSec : 2
   );
   const [fps, setFps] = useState<number>(
-    kind === "video" ? LTX_UI_LIMITS.defaultFps : 6
+    kind === "video" ? WAN_UI_LIMITS.defaultFps : 6
   );
   const [startImage, setStartImage] = useState("");
   const [startImageSource, setStartImageSource] =
@@ -118,9 +128,11 @@ export function GenerateForm({
 
   const videoPlan =
     kind === "video"
-      ? videoEngine === "ltx"
-        ? planLtxVideo({ width, height, fps, durationSec })
-        : planSvdVideo({ width, height, fps, durationSec })
+      ? videoEngine === "wan"
+        ? planWanVideo({ width, height, fps, durationSec })
+        : videoEngine === "ltx"
+          ? planLtxVideo({ width, height, fps, durationSec })
+          : planSvdVideo({ width, height, fps, durationSec })
       : null;
   const videoRisky = Boolean(videoPlan?.vramRisky);
   const durationInputMax = videoLimits.maxDurationSec;
@@ -132,7 +144,17 @@ export function GenerateForm({
 
   function applyVideoEngine(next: VideoEngineId) {
     setVideoEngine(next);
-    if (next === "ltx") {
+    if (next === "wan") {
+      setWidth(WAN_UI_LIMITS.defaultWidth);
+      setHeight(WAN_UI_LIMITS.defaultHeight);
+      setDurationSec(WAN_UI_LIMITS.defaultDurationSec);
+      setFps(WAN_UI_LIMITS.defaultFps);
+      const wan =
+        checkpoints.find((c) => c.toLowerCase().includes("wan2.1_i2v")) ??
+        checkpoints.find((c) => c.toLowerCase().includes("wan")) ??
+        DEFAULT_WAN_UNET;
+      setModel(wan);
+    } else if (next === "ltx") {
       setWidth(LTX_UI_LIMITS.defaultWidth);
       setHeight(LTX_UI_LIMITS.defaultHeight);
       setDurationSec(LTX_UI_LIMITS.defaultDurationSec);
@@ -463,10 +485,10 @@ export function GenerateForm({
           batch: kind === "image" ? batch : 1,
         };
 
-        // ——— LTX długie wideo: chunki + stitch (Legion pattern) ———
+        // ——— Wan/LTX długie wideo: chunki + stitch (Legion pattern) ———
         if (
           kind === "video" &&
-          videoEngine === "ltx" &&
+          isChunkedVideoEngine(videoEngine) &&
           videoPlan?.chunkPlan?.chunked
         ) {
           const plan = videoPlan.chunkPlan;
@@ -477,6 +499,10 @@ export function GenerateForm({
           }> = [];
           let cursorStart = startImage.trim();
           let cursorSource = startImageSource;
+          const stitchPrefix =
+            videoEngine === "wan"
+              ? "studio/video-wan-stitched"
+              : "studio/video-ltx-stitched";
 
           for (const chunk of plan.chunks) {
             const isLast = chunk.index === plan.chunkCount - 1;
@@ -507,7 +533,7 @@ export function GenerateForm({
               durationSec,
               fps,
               startImage: cursorStart,
-              videoEngine: "ltx",
+              videoEngine,
               faceRestore,
               ltxChunkLength: chunk.length,
               ltxSaveTail: !isLast,
@@ -594,7 +620,7 @@ export function GenerateForm({
               clips,
               fps,
               overlapFrames: plan.overlap,
-              filenamePrefix: "studio/video-ltx-stitched",
+              filenamePrefix: stitchPrefix,
             }),
           });
           const stitchData = await stitchRes.json();
@@ -631,7 +657,7 @@ export function GenerateForm({
           return;
         }
 
-        // ——— Pojedynczy job (obraz / SVD / LTX ≤121) ———
+        // ——— Pojedynczy job (obraz / SVD / Wan|LTX ≤ SAFE) ———
         const body: Record<string, unknown> = { ...baseBody };
         if (kind === "video") {
           body.durationSec = durationSec;
@@ -639,7 +665,10 @@ export function GenerateForm({
           body.startImage = startImage.trim();
           body.videoEngine = videoEngine;
           body.faceRestore = faceRestore;
-          if (videoEngine === "ltx" && videoPlan?.chunkPlan?.chunks[0]) {
+          if (
+            isChunkedVideoEngine(videoEngine) &&
+            videoPlan?.chunkPlan?.chunks[0]
+          ) {
             body.ltxChunkLength = videoPlan.chunkPlan.chunks[0].length;
             body.ltxSaveTail = false;
             body.ltxChunkIndex = 0;
@@ -739,6 +768,17 @@ export function GenerateForm({
                   </button>
                 ))}
               </div>
+              {videoEngine === "wan" ? (
+                <p className="rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-2 text-[12px] leading-relaxed text-teal-100/85">
+                  <span className="font-medium text-teal-50">
+                    fotoreal / wolniej / offload
+                  </span>
+                  {" — "}
+                  Wan 2.1 I2V FP8 (480p) + Dynamic VRAM na ~16 GB. Dłuższe klipy =
+                  chunki (≤{WAN_UI_LIMITS.maxLength} klatek) + stitch. LTX zostaje
+                  jako szybszy draft.
+                </p>
+              ) : null}
             </fieldset>
 
             <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
@@ -753,8 +793,8 @@ export function GenerateForm({
                   Face restore (CodeFormer)
                 </span>
                 <span className="block text-[11px] text-stone-500">
-                  Wymaga facerestore_cf + codeformer.pth na Legionie. Lekko
-                  spowalnia i zużywa VRAM.
+                  Per chunk. Wymaga facerestore_cf + codeformer.pth na Legionie.
+                  Lekko spowalnia i zużywa VRAM.
                 </span>
               </span>
             </label>
@@ -994,7 +1034,15 @@ export function GenerateForm({
               type="number"
               min={256}
               max={kind === "video" ? videoLimits.maxWidth : 2048}
-              step={kind === "video" && videoEngine === "ltx" ? 32 : 64}
+              step={
+                kind === "video"
+                  ? videoEngine === "ltx"
+                    ? 32
+                    : videoEngine === "wan"
+                      ? 16
+                      : 64
+                  : 64
+              }
               value={width}
               onChange={(e) => setWidth(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -1005,7 +1053,15 @@ export function GenerateForm({
               type="number"
               min={256}
               max={kind === "video" ? videoLimits.maxHeight : 2048}
-              step={kind === "video" && videoEngine === "ltx" ? 32 : 64}
+              step={
+                kind === "video"
+                  ? videoEngine === "ltx"
+                    ? 32
+                    : videoEngine === "wan"
+                      ? 16
+                      : 64
+                  : 64
+              }
               value={height}
               onChange={(e) => setHeight(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -1064,11 +1120,17 @@ export function GenerateForm({
               (
               <span className="font-mono">{videoPlan.frames}</span> klatek @{" "}
               <span className="font-mono">{videoPlan.fps}</span> FPS)
-              {videoEngine === "ltx" && videoPlan.chunkPlan?.chunked ? (
+              {isChunkedVideoEngine(videoEngine) &&
+              videoPlan.chunkPlan?.chunked ? (
                 <span className="text-teal-100/80">
                   {" "}
                   · {videoPlan.chunkPlan.chunkCount} chunków (overlap{" "}
                   {videoPlan.chunkPlan.overlap} + stitch)
+                </span>
+              ) : videoEngine === "wan" ? (
+                <span className="text-stone-500">
+                  {" "}
+                  · 1 chunk · Wan length 4n+1 (≤{WAN_UI_LIMITS.maxLength})
                 </span>
               ) : videoEngine === "ltx" ? (
                 <span className="text-stone-500">
@@ -1080,16 +1142,20 @@ export function GenerateForm({
             {videoPlan.durationClamped ? (
               <p className="text-amber-200/85">
                 Zadany czas przekracza max{" "}
-                {videoEngine === "ltx"
-                  ? LTX_UI_LIMITS.maxDurationSec
+                {isChunkedVideoEngine(videoEngine)
+                  ? videoLimits.maxDurationSec
                   : videoPlan.maxDurationAtFps}
                 s
-                {videoEngine === "ltx"
-                  ? ` (chunki ≤${LTX_UI_LIMITS.maxLength} klatek)`
+                {isChunkedVideoEngine(videoEngine)
+                  ? ` (chunki ≤${
+                      videoEngine === "wan"
+                        ? WAN_UI_LIMITS.maxLength
+                        : LTX_UI_LIMITS.maxLength
+                    } klatek)`
                   : ` przy ${videoPlan.fps} FPS`}{" "}
                 — wysyłamy {videoPlan.frames} klatek /{" "}
                 {videoPlan.effectiveDurationSec}s
-                {videoEngine === "ltx" && videoPlan.chunkPlan?.chunked
+                {videoPlan.chunkPlan?.chunked
                   ? ` w ${videoPlan.chunkPlan.chunkCount} odcinkach`
                   : ""}
                 .
@@ -1101,13 +1167,19 @@ export function GenerateForm({
             <p className="text-stone-500">
               Start frame w Comfy <code className="text-stone-400">input</code> —
               upload / „Z galerii”.{" "}
-              {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
+              {videoEngine === "wan"
+                ? WAN_UI_LIMITS.note
+                : videoEngine === "ltx"
+                  ? LTX_UI_LIMITS.note
+                  : SVD_UI_LIMITS.note}
             </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
-                {videoEngine === "ltx"
-                  ? `Uwaga VRAM (~16 GB): chunk >~${LTX_UI_LIMITS.comfortLength} klatek — Legion SAFE to ${LTX_UI_LIMITS.maxLength} @ 768×512; dłuższe wideo idzie chunkami.`
-                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
+                {videoEngine === "wan"
+                  ? `Uwaga VRAM (~16 GB): chunk >~${WAN_UI_LIMITS.comfortLength} klatek — provisional SAFE ${WAN_UI_LIMITS.maxLength} @ 832×480 FP8 + offload; dłuższe idzie chunkami.`
+                  : videoEngine === "ltx"
+                    ? `Uwaga VRAM (~16 GB): chunk >~${LTX_UI_LIMITS.comfortLength} klatek — Legion SAFE to ${LTX_UI_LIMITS.maxLength} @ 768×512; dłuższe wideo idzie chunkami.`
+                    : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
               </p>
             ) : null}
           </div>
