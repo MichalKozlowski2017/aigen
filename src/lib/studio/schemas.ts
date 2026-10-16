@@ -24,13 +24,13 @@ export const generateBodySchema = z.object({
       type: z.string().max(40).optional().default("output"),
     })
     .optional(),
-  /** Silnik wideo: ltx (jakość) | svd (draft) */
-  videoEngine: z.enum(["ltx", "svd"]).optional(),
+  /** Silnik wideo: wan (jakość) | ltx (draft) | svd (legacy) */
+  videoEngine: z.enum(["wan", "ltx", "svd"]).optional(),
   /** CodeFormer (facerestore_cf) na klatkach przed VHS — per chunk */
   faceRestore: z.boolean().optional().default(false),
-  /** Długość jednego chunka LTX (8n+1 ≤ 121) — gdy chunked pipeline */
+  /** Długość jednego chunka (Wan 4n+1 ≤81 / LTX 8n+1 ≤121) */
   ltxChunkLength: z.number().int().min(9).max(121).optional(),
-  /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji */
+  /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji chunków */
   ltxSaveTail: z.boolean().optional().default(false),
   /** Indeks chunka (prefix plików) */
   ltxChunkIndex: z.number().int().min(0).max(64).optional(),

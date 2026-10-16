@@ -98,6 +98,7 @@ export async function POST(request: Request) {
       videoLoader:
         parsed.data.kind === "video"
           ? (
+              (workflow["37"] as { class_type?: string } | undefined)?.class_type ??
               (workflow["10"] as { class_type?: string } | undefined)?.class_type ??
               (workflow["1"] as { class_type?: string } | undefined)?.class_type
             )
