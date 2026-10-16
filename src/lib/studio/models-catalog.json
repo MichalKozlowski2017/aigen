@@ -100,14 +100,47 @@
   },
   {
     "id": "svd-xt",
-    "name": "Stable Video Diffusion XT",
+    "name": "Stable Video Diffusion XT (draft)",
     "type": "checkpoint",
     "filename": "svd_xt.safetensors",
     "targetSubdir": "checkpoints",
     "downloadUrl": "https://huggingface.co/stabilityai/stable-video-diffusion-img2vid-xt/resolve/main/svd_xt.safetensors",
     "sizeHint": "~9.5 GB",
-    "notes": "Wideo (img2vid). Na 16 GB trzymaj 512px i krótkie klipy. Wymaga też custom node VHS (Video Helper Suite).",
+    "notes": "Szybki draft wideo (SVD). Domyślna jakość to LTX. Na 16 GB krótkie klipy + VHS.",
     "vramHintGb": 12
+  },
+  {
+    "id": "ltx-video-2b-095",
+    "name": "LTX-Video 2B v0.9.5",
+    "type": "checkpoint",
+    "filename": "ltx-video-2b-v0.9.5.safetensors",
+    "targetSubdir": "checkpoints",
+    "downloadUrl": "https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.5.safetensors",
+    "sizeHint": "~5–6 GB",
+    "notes": "Domyślny silnik wideo (I2V). Wymaga T5xxl (CLIPLoader type=ltxv) + VHS. Krótkie klipy 2–3 s @ 24 FPS na 16 GB.",
+    "vramHintGb": 12
+  },
+  {
+    "id": "t5xxl-fp8-ltxv",
+    "name": "T5-XXL fp8 (LTXV text encoder)",
+    "type": "clip",
+    "filename": "t5xxl_fp8_e4m3fn_scaled.safetensors",
+    "targetSubdir": "text_encoders",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/stable-diffusion-3.5-fp8/resolve/main/text_encoders/t5xxl_fp8_e4m3fn_scaled.safetensors",
+    "sizeHint": "~5 GB",
+    "notes": "CLIPLoader type=ltxv dla workflow LTX. Preferuj fp8 na 16 GB (fp16 też działa, więcej VRAM).",
+    "vramHintGb": 6
+  },
+  {
+    "id": "codeformer",
+    "name": "CodeFormer (face restore)",
+    "type": "other",
+    "filename": "codeformer.pth",
+    "targetSubdir": "facerestore_models",
+    "downloadUrl": "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth",
+    "sizeHint": "~360 MB",
+    "notes": "Opcjonalny face restore w panelu Wideo. Wymaga custom node facerestore_cf (FaceRestoreModelLoader / FaceRestoreCFWithModel).",
+    "vramHintGb": 2
   },
   {
     "id": "lora-offset-noise",

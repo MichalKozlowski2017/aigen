@@ -64,6 +64,23 @@ function looksLikeVhsMissing(blob: string): boolean {
   );
 }
 
+function looksLikeFaceRestoreMissing(blob: string): boolean {
+  return (
+    /FaceRestoreCFWithModel|FaceRestoreModelLoader|facerestore_cf/i.test(
+      blob
+    ) &&
+    (/missing_node_type|not found|No module/i.test(blob) ||
+      /Custom validation failed|Value not in list/i.test(blob))
+  );
+}
+
+function looksLikeLtxMissing(blob: string): boolean {
+  return (
+    /LTXVImgToVideo|LTXVConditioning|LTXVScheduler/i.test(blob) &&
+    /missing_node_type|not found/i.test(blob)
+  );
+}
+
 /** Wyciąga czytelne linie z node_errors Comfy. */
 export function summarizeNodeErrors(nodeErrors: unknown): string {
   if (!nodeErrors || typeof nodeErrors !== "object") return "";
@@ -131,6 +148,25 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
       hint: VHS_HINT,
       linkHref: VHS_LINK,
       linkLabel: "ComfyUI-VideoHelperSuite (GitHub)",
+    });
+  }
+
+  if (looksLikeFaceRestoreMissing(blob)) {
+    return wrap({
+      code: "missing_facerestore",
+      message:
+        "Brak face restore (facerestore_cf / CodeFormer) na ComfyUI.",
+      hint: "Zainstaluj custom node facerestore_cf + models/facerestore_models/codeformer.pth, albo wyłącz toggle Face restore.",
+      linkHref: "https://github.com/mav-rik/facerestore_cf",
+      linkLabel: "facerestore_cf (GitHub)",
+    });
+  }
+
+  if (looksLikeLtxMissing(blob)) {
+    return wrap({
+      code: "missing_ltx_nodes",
+      message: "Brak node’ów LTXV w ComfyUI (zaktualizuj Comfy do wersji z LTXV).",
+      hint: "LTXVImgToVideo / LTXVScheduler są wbudowane w nowsze ComfyUI. Zaktualizuj Comfy albo wybierz silnik SVD (draft).",
     });
   }
 

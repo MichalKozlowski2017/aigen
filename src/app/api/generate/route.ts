@@ -8,7 +8,7 @@ import {
 import { ensureStartImageInComfyInput } from "@/lib/studio/ensure-start-image";
 import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
-import { buildWorkflow, planSvdVideo } from "@/lib/studio/workflow-builder";
+import { buildWorkflow, planVideo } from "@/lib/studio/workflow-builder";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error:
-          "Workflow wideo (SVD) wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
+          "Workflow wideo wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
       },
       { status: 400 }
     );
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
     };
 
     const videoPlan =
-      parsed.data.kind === "video" ? planSvdVideo(bodyForComfy) : null;
+      parsed.data.kind === "video" ? planVideo(bodyForComfy) : null;
 
     const { workflow, template, engine } = buildWorkflow(bodyForComfy);
     const result = await enqueuePrompt(workflow);

@@ -24,6 +24,10 @@ export const generateBodySchema = z.object({
       type: z.string().max(40).optional().default("output"),
     })
     .optional(),
+  /** Silnik wideo: ltx (jakość) | svd (draft) */
+  videoEngine: z.enum(["ltx", "svd"]).optional(),
+  /** CodeFormer (facerestore_cf) na klatkach przed VHS */
+  faceRestore: z.boolean().optional().default(false),
 });
 
 export type GenerateBody = z.infer<typeof generateBodySchema>;

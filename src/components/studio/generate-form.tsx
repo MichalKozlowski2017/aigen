@@ -11,9 +11,19 @@ import {
 } from "@/lib/studio/flux";
 import type { GalleryItem } from "@/lib/studio/types";
 import {
-  VIDEO_UI_LIMITS,
+  DEFAULT_VIDEO_ENGINE,
+  LTX_UI_LIMITS,
+  SVD_UI_LIMITS,
+  VIDEO_ENGINE_OPTIONS,
   estimateVideoFrames,
+  planLtxVideo,
+  planSvdVideo,
+  snapLtxLength,
+  type VideoEngineId,
 } from "@/lib/studio/workflow-builder";
+import {
+  DEFAULT_LTX_CHECKPOINT,
+} from "@/lib/studio/video-engines";
 
 type JobOutput = {
   filename: string;
@@ -62,12 +72,26 @@ export function GenerateForm({
   const [negativePrompt, setNegativePrompt] = useState(
     kind === "image" && !isFluxModel(defaultModel) ? DEFAULT_SDXL_NEGATIVE : ""
   );
-  const [width, setWidth] = useState(kind === "video" ? 512 : 1024);
-  const [height, setHeight] = useState(kind === "video" ? 512 : 1024);
+  const [videoEngine, setVideoEngine] = useState<VideoEngineId>(
+    kind === "video" ? DEFAULT_VIDEO_ENGINE : "svd"
+  );
+  const [faceRestore, setFaceRestore] = useState(false);
+  const videoLimits =
+    videoEngine === "ltx" ? LTX_UI_LIMITS : SVD_UI_LIMITS;
+  const [width, setWidth] = useState<number>(
+    kind === "video" ? LTX_UI_LIMITS.defaultWidth : 1024
+  );
+  const [height, setHeight] = useState<number>(
+    kind === "video" ? LTX_UI_LIMITS.defaultHeight : 1024
+  );
   const [seed, setSeed] = useState(-1);
   const [batch, setBatch] = useState(1);
-  const [durationSec, setDurationSec] = useState(2);
-  const [fps, setFps] = useState(6);
+  const [durationSec, setDurationSec] = useState<number>(
+    kind === "video" ? LTX_UI_LIMITS.defaultDurationSec : 2
+  );
+  const [fps, setFps] = useState<number>(
+    kind === "video" ? LTX_UI_LIMITS.defaultFps : 6
+  );
   const [startImage, setStartImage] = useState("");
   const [startImageSource, setStartImageSource] =
     useState<StartImageSource | null>(null);
@@ -95,12 +119,37 @@ export function GenerateForm({
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
 
-  const videoFrames = estimateVideoFrames(durationSec, fps);
-  const videoRisky =
-    kind === "video" &&
-    (durationSec > VIDEO_UI_LIMITS.comfortDurationSec ||
-      fps > VIDEO_UI_LIMITS.comfortFps ||
-      videoFrames > VIDEO_UI_LIMITS.comfortFrames);
+  const videoPlan =
+    kind === "video"
+      ? videoEngine === "ltx"
+        ? planLtxVideo({ width, height, fps, durationSec })
+        : planSvdVideo({ width, height, fps, durationSec })
+      : null;
+  const videoFrames =
+    videoPlan?.frames ?? estimateVideoFrames(durationSec, fps);
+  const videoRisky = Boolean(videoPlan?.vramRisky);
+
+  function applyVideoEngine(next: VideoEngineId) {
+    setVideoEngine(next);
+    if (next === "ltx") {
+      setWidth(LTX_UI_LIMITS.defaultWidth);
+      setHeight(LTX_UI_LIMITS.defaultHeight);
+      setDurationSec(LTX_UI_LIMITS.defaultDurationSec);
+      setFps(LTX_UI_LIMITS.defaultFps);
+      if (!model.toLowerCase().includes("ltx")) {
+        setModel(DEFAULT_LTX_CHECKPOINT);
+      }
+    } else {
+      setWidth(SVD_UI_LIMITS.defaultWidth);
+      setHeight(SVD_UI_LIMITS.defaultHeight);
+      setDurationSec(SVD_UI_LIMITS.defaultDurationSec);
+      setFps(SVD_UI_LIMITS.defaultFps);
+      const svd =
+        checkpoints.find((c) => c.toLowerCase().includes("svd")) ??
+        "svd_xt.safetensors";
+      setModel(svd);
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -347,6 +396,8 @@ export function GenerateForm({
           body.durationSec = durationSec;
           body.fps = fps;
           body.startImage = startImage.trim();
+          body.videoEngine = videoEngine;
+          body.faceRestore = faceRestore;
           if (startImageSource) {
             body.startImageSource = startImageSource;
           }
@@ -438,6 +489,50 @@ export function GenerateForm({
       <form onSubmit={onSubmit} className="studio-fade-in space-y-5">
         {kind === "video" ? (
           <div className="space-y-3">
+            <fieldset className="space-y-2">
+              <legend className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                Silnik wideo
+              </legend>
+              <div className="flex flex-wrap gap-2">
+                {VIDEO_ENGINE_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => applyVideoEngine(opt.id)}
+                    className={[
+                      "rounded-lg border px-3 py-2 text-left text-sm transition",
+                      videoEngine === opt.id
+                        ? "border-teal-400/50 bg-teal-400/10 text-teal-50"
+                        : "border-white/10 bg-white/[0.03] text-stone-300 hover:border-white/20",
+                    ].join(" ")}
+                  >
+                    <span className="block font-medium">{opt.label}</span>
+                    <span className="mt-0.5 block text-[11px] text-stone-500">
+                      {opt.blurb}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+              <input
+                type="checkbox"
+                checked={faceRestore}
+                onChange={(e) => setFaceRestore(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block text-sm text-stone-200">
+                  Face restore (CodeFormer)
+                </span>
+                <span className="block text-[11px] text-stone-500">
+                  Wymaga facerestore_cf + codeformer.pth na Legionie. Lekko
+                  spowalnia i zużywa VRAM.
+                </span>
+              </span>
+            </label>
+
             <label className="block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Obraz startowy
             </label>
@@ -672,8 +767,8 @@ export function GenerateForm({
             <input
               type="number"
               min={256}
-              max={kind === "video" ? 576 : 2048}
-              step={64}
+              max={kind === "video" ? videoLimits.maxWidth : 2048}
+              step={kind === "video" && videoEngine === "ltx" ? 32 : 64}
               value={width}
               onChange={(e) => setWidth(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -683,8 +778,8 @@ export function GenerateForm({
             <input
               type="number"
               min={256}
-              max={kind === "video" ? 576 : 2048}
-              step={64}
+              max={kind === "video" ? videoLimits.maxHeight : 2048}
+              step={kind === "video" && videoEngine === "ltx" ? 32 : 64}
               value={height}
               onChange={(e) => setHeight(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -703,22 +798,22 @@ export function GenerateForm({
             </Field>
           ) : (
             <>
-              <Field label={`Czas (s, max ${VIDEO_UI_LIMITS.maxDurationSec})`}>
+              <Field label={`Czas (s, max ${videoLimits.maxDurationSec})`}>
                 <input
                   type="number"
                   min={1}
-                  max={VIDEO_UI_LIMITS.maxDurationSec}
+                  max={videoLimits.maxDurationSec}
                   step={0.5}
                   value={durationSec}
                   onChange={(e) => setDurationSec(Number(e.target.value))}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label={`FPS (max ${VIDEO_UI_LIMITS.maxFps})`}>
+              <Field label={`FPS (max ${videoLimits.maxFps})`}>
                 <input
                   type="number"
                   min={1}
-                  max={VIDEO_UI_LIMITS.maxFps}
+                  max={videoLimits.maxFps}
                   value={fps}
                   onChange={(e) => setFps(Number(e.target.value))}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
@@ -731,23 +826,33 @@ export function GenerateForm({
         {kind === "video" ? (
           <div className="space-y-1.5 text-sm">
             <p className="text-stone-400">
-              Klatki ≈ <span className="font-mono text-stone-200">{videoFrames}</span>{" "}
-              ({durationSec}s × {fps} FPS)
+              Klatki ≈{" "}
+              <span className="font-mono text-stone-200">{videoFrames}</span>
+              {videoEngine === "ltx" ? (
+                <span className="text-stone-500">
+                  {" "}
+                  (LTX length 8n+1, snap{" "}
+                  {snapLtxLength(estimateVideoFrames(durationSec, fps))})
+                </span>
+              ) : (
+                <span className="text-stone-500">
+                  {" "}
+                  ({durationSec}s × {fps} FPS)
+                </span>
+              )}
               {videoLimitsNote ? (
                 <span className="text-stone-500"> · {videoLimitsNote}</span>
               ) : null}
             </p>
             <p className="text-stone-500">
-              Start frame musi być w Comfy <code className="text-stone-400">input</code>{" "}
-              — upload albo „Z galerii” (sama nazwa z output często powoduje błąd
-              walidacji LoadImage).
+              Start frame w Comfy <code className="text-stone-400">input</code> —
+              upload / „Z galerii”. {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
             </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
-                Uwaga VRAM (~16 GB): powyżej ~{VIDEO_UI_LIMITS.comfortFrames} klatek /
-                ~{VIDEO_UI_LIMITS.comfortDurationSec}–8 s SVD XT często kończy się OOM
-                albo bardzo długą generacją. Schema Comfy pozwala więcej (do{" "}
-                {VIDEO_UI_LIMITS.schemaMaxFrames}) — koszty rosną z liczbą klatek.
+                {videoEngine === "ltx"
+                  ? `Uwaga VRAM (~16 GB): LTX powyżej ~${LTX_UI_LIMITS.comfortLength} klatek / ${LTX_UI_LIMITS.comfortDurationSec}s często OOM. Skróć czas albo rozdzielczość.`
+                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM. LTX jest lepszy jakościowo przy krótkich klipach.`}
               </p>
             ) : null}
           </div>
