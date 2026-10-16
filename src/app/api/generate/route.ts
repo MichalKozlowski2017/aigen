@@ -97,8 +97,13 @@ export async function POST(request: Request) {
       // Debug deploy: potwierdź loader na prod
       videoLoader:
         parsed.data.kind === "video"
-          ? (workflow["1"] as { class_type?: string } | undefined)?.class_type
+          ? (
+              (workflow["10"] as { class_type?: string } | undefined)?.class_type ??
+              (workflow["1"] as { class_type?: string } | undefined)?.class_type
+            )
           : undefined,
+      ltxChunkIndex: parsed.data.ltxChunkIndex,
+      ltxChunkLength: parsed.data.ltxChunkLength,
       modelPrompt: boost.modelPrompt,
       modelNegative: boost.modelNegative,
       promptBoost: {

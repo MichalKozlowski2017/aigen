@@ -26,8 +26,31 @@ export const generateBodySchema = z.object({
     .optional(),
   /** Silnik wideo: ltx (jakość) | svd (draft) */
   videoEngine: z.enum(["ltx", "svd"]).optional(),
-  /** CodeFormer (facerestore_cf) na klatkach przed VHS */
+  /** CodeFormer (facerestore_cf) na klatkach przed VHS — per chunk */
   faceRestore: z.boolean().optional().default(false),
+  /** Długość jednego chunka LTX (8n+1 ≤ 121) — gdy chunked pipeline */
+  ltxChunkLength: z.number().int().min(9).max(121).optional(),
+  /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji */
+  ltxSaveTail: z.boolean().optional().default(false),
+  /** Indeks chunka (prefix plików) */
+  ltxChunkIndex: z.number().int().min(0).max(64).optional(),
+});
+
+export const stitchBodySchema = z.object({
+  clips: z
+    .array(
+      z.object({
+        filename: z.string().min(1).max(500),
+        subfolder: z.string().max(500).optional().default(""),
+        type: z.string().max(40).optional().default("output"),
+      })
+    )
+    .min(2)
+    .max(64),
+  fps: z.number().int().min(1).max(60).default(24),
+  /** Ile pierwszych klatek pominąć w clipach 2…N (overlap) */
+  overlapFrames: z.number().int().min(0).max(8).default(1),
+  filenamePrefix: z.string().max(120).optional().default("studio/video-ltx-stitched"),
 });
 
 export type GenerateBody = z.infer<typeof generateBodySchema>;
