@@ -7,14 +7,17 @@ export function GalleryClient({
   initialItems,
   configured,
   message,
+  source = "none",
 }: {
   initialItems: GalleryItem[];
   configured: boolean;
   message: string | null;
+  source?: "local" | "comfy" | "none";
 }) {
   const [kind, setKind] = useState<"all" | "image" | "video">("all");
   const [items, setItems] = useState(initialItems);
   const [error, setError] = useState<string | null>(message);
+  const [src, setSrc] = useState(source);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,6 +31,7 @@ export function GalleryClient({
       }
       setItems(data.items ?? []);
       setError(data.error);
+      setSrc(data.source ?? "none");
     })();
     return () => {
       cancelled = true;
@@ -36,22 +40,29 @@ export function GalleryClient({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        {(["all", "image", "video"] as const).map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setKind(k)}
-            className={[
-              "rounded-md px-3 py-1.5 text-sm transition",
-              kind === k
-                ? "bg-teal-400/15 text-teal-100"
-                : "text-stone-400 hover:bg-white/[0.04]",
-            ].join(" ")}
-          >
-            {k === "all" ? "Wszystko" : k === "image" ? "Obrazy" : "Wideo"}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {(["all", "image", "video"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setKind(k)}
+              className={[
+                "rounded-md px-3 py-1.5 text-sm transition",
+                kind === k
+                  ? "bg-teal-400/15 text-teal-100"
+                  : "text-stone-400 hover:bg-white/[0.04]",
+              ].join(" ")}
+            >
+              {k === "all" ? "Wszystko" : k === "image" ? "Obrazy" : "Wideo"}
+            </button>
+          ))}
+        </div>
+        {src !== "none" ? (
+          <p className="text-xs text-stone-500">
+            Źródło: {src === "comfy" ? "Comfy (historia)" : "dysk lokalny"}
+          </p>
+        ) : null}
       </div>
 
       {!configured || error ? (
@@ -59,7 +70,9 @@ export function GalleryClient({
       ) : null}
 
       {items.length === 0 && configured && !error ? (
-        <p className="text-sm text-stone-500">Brak plików w katalogu output.</p>
+        <p className="text-sm text-stone-500">
+          Brak plików — wygeneruj obraz na zakładce Generuj (trafia do output / historii Comfy).
+        </p>
       ) : null}
 
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -81,7 +94,9 @@ export function GalleryClient({
             <div className="space-y-1 px-3 py-2.5">
               <p className="truncate text-sm text-stone-200">{item.name}</p>
               <p className="text-xs text-stone-500">
-                {(item.sizeBytes / 1024).toFixed(0)} KB ·{" "}
+                {item.sizeBytes > 0
+                  ? `${(item.sizeBytes / 1024).toFixed(0)} KB · `
+                  : null}
                 {new Date(item.mtimeMs).toLocaleString("pl-PL")}
               </p>
             </div>

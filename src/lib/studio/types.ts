@@ -19,6 +19,14 @@ export type GalleryItem = {
   sizeBytes: number;
   mtimeMs: number;
   url: string;
+  /** Skąd pochodzi wpis: lokalny OUTPUT_DIR albo historia/output Comfy przez tunel. */
+  source?: "local" | "comfy";
+  /** Pola Comfy /view — do ponownego użycia (np. start frame w wideo). */
+  comfy?: {
+    filename: string;
+    subfolder: string;
+    type: string;
+  };
 };
 
 export type ModelType =
@@ -49,6 +57,8 @@ export type ModelLibraryItem = ModelCatalogEntry & {
   installedPath: string | null;
   downloadJobId: string | null;
   error: string | null;
+  /** local = skan dysku; comfy = GET /models/{folder} przez COMFYUI_URL */
+  source?: "local" | "comfy";
 };
 
 export type DownloadJob = {

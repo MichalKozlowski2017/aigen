@@ -43,6 +43,19 @@ COMFYUI_OUTPUT_DIR=C:\ścieżka\do\ComfyUI\output
 - Bez `STUDIO_PASSWORD` panel jest otwarty lokalnie.
 - Z hasłem chronione są wszystkie strony oraz `/api/*` (sesja cookie).
 
+### Vercel (panel) + Legion (Comfy)
+
+Na Vercel ustaw tylko:
+
+```env
+COMFYUI_URL=https://twoj-tunnel.example
+STUDIO_PASSWORD=...
+```
+
+- **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
+- **Galeria:** outputy z historii Comfy (`/history`) + `/api/comfy-view`.
+- `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
+
 ## 3. Uruchomienie razem
 
 Terminal A — ComfyUI (GPU):
@@ -65,9 +78,9 @@ Jeśli ComfyUI nie działa, pulpit pokazuje **offline** — API zwraca 503 przy 
 ## 4. Modele
 
 - Katalog polecanych: `src/lib/studio/models-catalog.json`
-- Strona `/models` skanuje `COMFYUI_MODELS_DIR` i potrafi pobierać z publicznych URL (Hugging Face).
-- Domyślny workflow obrazu: `src/lib/studio/workflows/txt2img-sdxl.json` → checkpoint `sd_xl_base_1.0.safetensors`.
-- Workflow wideo: `src/lib/studio/workflows/txt2video-svd.json`.
+- Strona `/models`: lokalnie skanuje `COMFYUI_MODELS_DIR` (+ Pobierz z HF); zdalnie (Vercel) odpytuje Comfy `/models/checkpoints`, `/models/diffusion_models`, `/models/text_encoders`, `/models/vae`, …
+- Domyślny workflow obrazu: Flux.2 (`txt2img-flux.json`); SDXL w dropdownie.
+- Workflow wideo: `src/lib/studio/workflows/txt2video-svd.json` — start frame: upload, galeria albo nazwa w `input`.
 
 Nie commituj plików `.safetensors` / `.ckpt`.
 

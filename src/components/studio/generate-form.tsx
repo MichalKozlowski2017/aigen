@@ -8,6 +8,7 @@ import {
   isFluxModel,
   type ImageModelOption,
 } from "@/lib/studio/flux";
+import type { GalleryItem } from "@/lib/studio/types";
 
 type JobOutput = {
   filename: string;
@@ -60,12 +61,48 @@ export function GenerateForm({
   const [boostWarnings, setBoostWarnings] = useState<string[]>([]);
   const [boostBusy, setBoostBusy] = useState(false);
   const [boostOpen, setBoostOpen] = useState(true);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryBusy, setGalleryBusy] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
 
   useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  useEffect(() => {
+    if (kind !== "video" || !galleryOpen) return;
+    let cancelled = false;
+    void (async () => {
+      setGalleryBusy(true);
+      setGalleryError(null);
+      try {
+        const res = await fetch("/api/gallery?kind=image&limit=40");
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.ok) {
+          setGalleryError(data.error ?? "Nie udało się wczytać galerii");
+          setGalleryItems([]);
+          return;
+        }
+        setGalleryItems((data.items as GalleryItem[]) ?? []);
+        if ((data.items ?? []).length === 0) {
+          setGalleryError(
+            data.error ?? "Galeria pusta — najpierw wygeneruj obraz."
+          );
+        }
+      } catch {
+        if (!cancelled) setGalleryError("Błąd sieci przy galerii");
+      } finally {
+        if (!cancelled) setGalleryBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [kind, galleryOpen]);
 
   useEffect(() => {
     const trimmed = prompt.trim();
@@ -181,6 +218,29 @@ export function GenerateForm({
       return;
     }
     void uploadStartFile(file);
+  }
+
+  async function importGalleryAsStart(item: GalleryItem) {
+    setError(null);
+    setGalleryError(null);
+    try {
+      const res = await fetch(item.url);
+      if (!res.ok) {
+        throw new Error(`Pobieranie z galerii HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const file = new File([blob], item.name || "gallery-start.png", {
+        type: blob.type || item.mime || "image/png",
+      });
+      await uploadStartFile(file);
+      setGalleryOpen(false);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Nie udało się zaimportować obrazu z galerii"
+      );
+    }
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -335,6 +395,52 @@ export function GenerateForm({
                 </div>
               </div>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setGalleryOpen((v) => !v)}
+                className="rounded-lg border border-white/12 px-3 py-2 text-sm text-stone-200 hover:border-teal-400/40 hover:text-teal-100"
+              >
+                {galleryOpen ? "Ukryj galerię" : "Z galerii"}
+              </button>
+            </div>
+
+            {galleryOpen ? (
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                <p className="mb-2 text-xs uppercase tracking-[0.16em] text-stone-500">
+                  Wybierz obraz startowy z Galerii
+                </p>
+                {galleryBusy ? (
+                  <p className="text-sm text-stone-500">Ładuję…</p>
+                ) : null}
+                {galleryError ? (
+                  <p className="text-sm text-amber-200/80">{galleryError}</p>
+                ) : null}
+                <ul className="grid max-h-56 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
+                  {galleryItems.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        disabled={uploadBusy}
+                        onClick={() => void importGalleryAsStart(item)}
+                        className="group block w-full overflow-hidden rounded-lg border border-white/10 bg-black/30 text-left hover:border-teal-400/50 disabled:opacity-50"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.url}
+                          alt={item.name}
+                          className="aspect-square w-full object-cover opacity-90 transition group-hover:opacity-100"
+                        />
+                        <span className="block truncate px-1.5 py-1 text-[10px] text-stone-500">
+                          {item.name}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             <Field label="Albo nazwa już w Comfy input">
               <input
                 type="text"
@@ -569,6 +675,20 @@ export function GenerateForm({
               );
             })}
           </div>
+          {status === "completed" && outputs.length > 0 ? (
+            <div className="mt-4 space-y-2 rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-3">
+              <p className="text-sm text-teal-100/90">
+                Zapisane w output ComfyUI — widać je w Galerii (historia / katalog
+                output).
+              </p>
+              <Link
+                href="/gallery"
+                className="inline-flex rounded-lg bg-teal-400 px-3 py-1.5 text-sm font-semibold text-[#04201a] hover:bg-teal-300"
+              >
+                Otwórz Galerię
+              </Link>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
