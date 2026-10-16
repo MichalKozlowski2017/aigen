@@ -127,9 +127,25 @@ function buildSdxlImageWorkflow(body: GenerateBody): WorkflowGraph {
   return graph;
 }
 
+export const VIDEO_UI_LIMITS = {
+  maxDurationSec: 60,
+  maxWidth: 576,
+  maxHeight: 576,
+  maxFps: 30,
+  /** Powyżej tego zwykle OOM / bardzo długo na SVD XT 16GB */
+  comfortDurationSec: 4,
+  comfortFps: 12,
+  note: "Wymaga SVD + Video Helper Suite (VHS). Obraz startowy: upload, galeria albo nazwa w Comfy input. Na ~16 GB VRAM SVD XT realistycznie ~2–8 s — dłuższe klipy / wysoki FPS mogą OOM albo trwać bardzo długo.",
+} as const;
+
+/** Szacunkowa liczba klatek = czas × FPS (minimum 8 jak w builderze). */
+export function estimateVideoFrames(durationSec: number, fps: number): number {
+  return Math.max(8, Math.round(durationSec * fps));
+}
+
 /**
- * SVD img2vid — limity pod ~16 GB VRAM (krótki klip, max 512).
- * Wymaga obrazu startowego w ComfyUI input (startImage) oraz Video Helper Suite (VHS_VideoCombine).
+ * SVD img2vid — UI pozwala do 60s / 30 FPS; na ~16 GB VRAM realistycznie krótkie klipy.
+ * Wymaga obrazu startowego w ComfyUI input oraz Video Helper Suite (VHS_VideoCombine).
  */
 function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
   const graph = asGraph(txt2videoTemplate);
@@ -139,11 +155,17 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
       ? Math.floor(Math.random() * 2_147_483_647)
       : body.seed;
 
-  const width = Math.min(body.width ?? 512, 576);
-  const height = Math.min(body.height ?? 512, 576);
-  const fps = Math.min(body.fps ?? 6, 12);
-  const durationSec = Math.min(body.durationSec ?? 2, 4);
-  const frames = Math.max(8, Math.min(Math.round(durationSec * fps), 25));
+  const width = Math.min(body.width ?? 512, VIDEO_UI_LIMITS.maxWidth);
+  const height = Math.min(body.height ?? 512, VIDEO_UI_LIMITS.maxHeight);
+  const fps = Math.min(
+    Math.max(body.fps ?? 6, 1),
+    VIDEO_UI_LIMITS.maxFps
+  );
+  const durationSec = Math.min(
+    Math.max(body.durationSec ?? 2, 1),
+    VIDEO_UI_LIMITS.maxDurationSec
+  );
+  const frames = estimateVideoFrames(durationSec, fps);
 
   graph["1"].inputs.ckpt_name = ckpt;
   graph["2"].inputs.image = body.startImage?.trim() || "start.png";
@@ -158,11 +180,3 @@ function buildVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
   return graph;
 }
-
-export const VIDEO_UI_LIMITS = {
-  maxDurationSec: 4,
-  maxWidth: 576,
-  maxHeight: 576,
-  maxFps: 12,
-  note: "Limity dopasowane do ~16 GB VRAM (RTX 5080). Wymaga SVD + VHS. Wrzuć obraz startowy powyżej promptu (upload do Comfy input) albo podaj istniejącą nazwę pliku.",
-} as const;

@@ -11,9 +11,9 @@ export const generateBodySchema = z.object({
   batch: z.number().int().min(1).max(4).optional().default(1),
   steps: z.number().int().min(1).max(60).optional(),
   cfg: z.number().min(1).max(30).optional(),
-  /** Sekundy klipu — tylko video */
-  durationSec: z.number().min(1).max(8).optional(),
-  fps: z.number().int().min(6).max(24).optional(),
+  /** Sekundy klipu — tylko video (UI do 60s; SVD/VRAM może nie uciągnąć) */
+  durationSec: z.number().min(1).max(60).optional(),
+  fps: z.number().int().min(1).max(30).optional(),
   /** Nazwa pliku w ComfyUI input (po uploadzie lub już obecna) */
   startImage: z.string().max(500).optional(),
 });

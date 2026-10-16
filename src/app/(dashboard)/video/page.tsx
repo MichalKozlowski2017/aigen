@@ -28,7 +28,7 @@ export default async function StudioVideoPage() {
         defaultModel={defaultModel}
         checkpoints={checkpoints}
         kind="video"
-        videoLimitsNote={`Max ${VIDEO_UI_LIMITS.maxDurationSec}s · ${VIDEO_UI_LIMITS.maxWidth}×${VIDEO_UI_LIMITS.maxHeight} · ${VIDEO_UI_LIMITS.maxFps} FPS`}
+        videoLimitsNote={`Limit UI ${VIDEO_UI_LIMITS.maxDurationSec}s / ${VIDEO_UI_LIMITS.maxFps} FPS · max ${VIDEO_UI_LIMITS.maxWidth}×${VIDEO_UI_LIMITS.maxHeight}`}
       />
     </div>
   );

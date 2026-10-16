@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { checkComfyHealth, enqueuePrompt } from "@/lib/studio/comfy-client";
+import {
+  friendlyComfyError,
+  formatFriendlyErrorLines,
+} from "@/lib/studio/comfy-errors";
 import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
 import { buildWorkflow } from "@/lib/studio/workflow-builder";
@@ -66,6 +70,7 @@ export async function POST(request: Request) {
       template,
       engine,
       kind: parsed.data.kind,
+      nodesTotal: result.nodesTotal,
       nodeErrors: result.nodeErrors,
       modelPrompt: boost.modelPrompt,
       modelNegative: boost.modelNegative,
@@ -79,10 +84,15 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
+    const attached = (
+      err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }
+    ).friendly;
+    const friendly = attached ?? friendlyComfyError(err);
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Enqueue failed",
+        error: formatFriendlyErrorLines(friendly),
+        errorDetail: friendly,
       },
       { status: 502 }
     );
