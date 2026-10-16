@@ -80,15 +80,14 @@ export async function POST(request: Request) {
     const uploaded = await uploadImageToComfy(file, filename, {
       overwrite: true,
     });
-    const startImage = uploaded.subfolder
-      ? `${uploaded.subfolder}/${uploaded.name}`
-      : uploaded.name;
+    // LoadImage wymaga basename w input/ — nie zwracaj subfolder/name
+    const startImage = uploaded.name;
     return NextResponse.json({
       ok: true,
       startImage,
       name: uploaded.name,
-      subfolder: uploaded.subfolder,
-      type: uploaded.type,
+      subfolder: uploaded.subfolder ?? "",
+      type: uploaded.type ?? "input",
     });
   } catch (err) {
     return NextResponse.json(

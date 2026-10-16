@@ -16,6 +16,14 @@ export const generateBodySchema = z.object({
   fps: z.number().int().min(1).max(30).optional(),
   /** Nazwa pliku w ComfyUI input (po uploadzie lub już obecna) */
   startImage: z.string().max(500).optional(),
+  /** Dokładna lokalizacja z galerii Comfy (/view) — unikamy zgadywania subfolderów */
+  startImageSource: z
+    .object({
+      filename: z.string().min(1).max(500),
+      subfolder: z.string().max(500).optional().default(""),
+      type: z.string().max(40).optional().default("output"),
+    })
+    .optional(),
 });
 
 export type GenerateBody = z.infer<typeof generateBodySchema>;

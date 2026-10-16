@@ -8,6 +8,10 @@ export type FriendlyComfyError = {
   linkHref?: string;
   linkLabel?: string;
   code?: string;
+  /** Wieloliniowy dump node_errors do UI */
+  details?: string;
+  nodeErrors?: unknown;
+  comfyError?: unknown;
 };
 
 const VHS_HINT =
@@ -60,24 +64,74 @@ function looksLikeVhsMissing(blob: string): boolean {
   );
 }
 
+/** Wyciąga czytelne linie z node_errors Comfy. */
+export function summarizeNodeErrors(nodeErrors: unknown): string {
+  if (!nodeErrors || typeof nodeErrors !== "object") return "";
+  const lines: string[] = [];
+  for (const [nodeId, payload] of Object.entries(
+    nodeErrors as Record<string, unknown>
+  )) {
+    const rec = asRecord(payload);
+    const classType =
+      typeof rec?.class_type === "string" ? rec.class_type : undefined;
+    const errors = Array.isArray(rec?.errors) ? rec.errors : [];
+    if (errors.length === 0) {
+      lines.push(`node ${nodeId}${classType ? ` (${classType})` : ""}: ${JSON.stringify(payload).slice(0, 240)}`);
+      continue;
+    }
+    for (const err of errors) {
+      const e = asRecord(err);
+      const type = typeof e?.type === "string" ? e.type : "";
+      const message = typeof e?.message === "string" ? e.message : "";
+      const details = typeof e?.details === "string" ? e.details : "";
+      const bit = [type, message, details].filter(Boolean).join(" — ");
+      lines.push(
+        `node ${nodeId}${classType ? ` (${classType})` : ""}: ${bit || JSON.stringify(err).slice(0, 200)}`
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+function attachNodeDump(
+  friendly: FriendlyComfyError,
+  raw: unknown
+): FriendlyComfyError {
+  const rec = asRecord(raw);
+  const nodeErrors = rec?.node_errors ?? rec?.nodeErrors ?? undefined;
+  const comfyError = rec?.error ?? undefined;
+  const details =
+    friendly.details ||
+    summarizeNodeErrors(nodeErrors) ||
+    (typeof comfyError === "object" && comfyError
+      ? JSON.stringify(comfyError)
+      : undefined);
+  return {
+    ...friendly,
+    details: details || friendly.details,
+    nodeErrors: nodeErrors ?? friendly.nodeErrors,
+    comfyError: comfyError ?? friendly.comfyError,
+  };
+}
+
 /**
  * Mapuje surowy błąd Comfy (obiekt / JSON string / Error.message) na komunikat PL.
- * Ważne: przekazuj razem `error` + `node_errors` — sam top-level message często
- * to tylko „Prompt outputs failed validation”.
+ * Zawsze przekazuj `{ error, node_errors }` razem.
  */
 export function friendlyComfyError(raw: unknown): FriendlyComfyError {
   const parts = collectText(raw);
   const blob = parts.join("\n");
+  const wrap = (f: FriendlyComfyError) => attachNodeDump(f, raw);
 
   if (looksLikeVhsMissing(blob)) {
-    return {
+    return wrap({
       code: "missing_vhs",
       message:
         "Brak Video Helper Suite na ComfyUI — node VHS_VideoCombine nie jest zainstalowany.",
       hint: VHS_HINT,
       linkHref: VHS_LINK,
       linkLabel: "ComfyUI-VideoHelperSuite (GitHub)",
-    };
+    });
   }
 
   const invalidImage = blob.match(/Invalid image file:\s*(.+)/i);
@@ -85,12 +139,13 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
     invalidImage ||
     (/Value not in list/i.test(blob) && /image/i.test(blob))
   ) {
-    const name = invalidImage?.[1]?.trim() || extractQuoted(blob) || "podany plik";
-    return {
+    const name =
+      invalidImage?.[1]?.trim() || extractQuoted(blob) || "podany plik";
+    return wrap({
       code: "invalid_start_image",
       message: `LoadImage: brak pliku „${name}” w katalogu Comfy input.`,
-      hint: "Wgraj obraz albo użyj „Z galerii” (kopiujemy do input). Nazwa z output (np. txt2img-flux2_…) sama nie wystarczy — stąd „Prompt outputs failed validation”.",
-    };
+      hint: "Upload musi trafić do /upload/image (type=input), a do workflow idzie ta sama basename. Nazwa z output/subfolder nie przejdzie.",
+    });
   }
 
   if (
@@ -98,22 +153,22 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
       blob
     )
   ) {
-    return {
+    return wrap({
       code: "svd_loader_mismatch",
       message:
-        "SVD wymaga ImageOnlyCheckpointLoader (CLIP_VISION) — nie CheckpointLoaderSimple (CLIP).",
-      hint: "Panel używa ImageOnlyCheckpointLoader w txt2video-svd. Zrestartuj / zaktualizuj deploy jeśli widzisz ten błąd.",
-    };
+        "SVD wymaga ImageOnlyCheckpointLoader (CLIP_VISION) — CheckpointLoaderSimple daje CLIP i pada walidacja (także po uploadzie!).",
+      hint: "Panel wymusza ImageOnlyCheckpointLoader w buildVideoWorkflow. Zrób hard refresh / poczekaj na deploy Vercel.",
+    });
   }
 
   if (/return type mismatch|received_type.*mismatch/i.test(blob)) {
-    return {
+    return wrap({
       code: "type_mismatch",
       message: "Niezgodność typów połączeń w workflow Comfy.",
       hint:
         extractDetailSnippet(blob) ||
-        "Sprawdź połączenia node’ów (np. CLIP vs CLIP_VISION, frame_rate INT/FLOAT).",
-    };
+        "Sprawdź połączenia node’ów (np. CLIP vs CLIP_VISION).",
+    });
   }
 
   const rec =
@@ -121,7 +176,7 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
     (typeof raw === "string" ? asRecord(tryParseJson(raw)) : null);
 
   const validation = explainPromptValidationFailure(raw, blob);
-  if (validation) return validation;
+  if (validation) return wrap(validation);
 
   if (rec?.type === "missing_node_type" || /missing_node_type/i.test(blob)) {
     const classType =
@@ -130,43 +185,49 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
         ? rec.message.match(/Node '([^']+)'/)?.[1]
         : undefined) ||
       "nieznany";
-    return {
+    return wrap({
       code: "missing_node",
       message: `Brak node’a „${classType}” w ComfyUI (custom node niezaainstalowany albo zła wersja).`,
       hint: "Zainstaluj brakujący custom node w ComfyUI Manager na Legionie i zrestartuj Comfy.",
-    };
+    });
   }
 
   if (typeof raw === "string" && raw.trim() && !raw.trim().startsWith("{")) {
-    return { message: raw.trim() };
+    return wrap({ message: raw.trim() });
   }
 
   if (rec && typeof rec.message === "string" && rec.message.trim()) {
-    // Jeśli to ogólne „failed validation” bez szczegółów — spróbuj node_errors w tym samym raw
-    if (/failed validation/i.test(rec.message) && asRecord(raw)?.node_errors) {
+    if (/failed validation/i.test(rec.message)) {
       const nested = explainPromptValidationFailure(raw, blob);
-      if (nested) return nested;
+      if (nested) return wrap(nested);
+      const dump = summarizeNodeErrors(rec.node_errors ?? asRecord(raw)?.node_errors);
+      return wrap({
+        code: "prompt_validation",
+        message: "Walidacja Comfy nie przeszła.",
+        hint: dump || "Brak szczegółów node_errors — sprawdź logi Comfy na Legionie.",
+        details: dump || undefined,
+      });
     }
-    return {
+    return wrap({
       message: rec.message.trim(),
       hint: typeof rec.details === "string" ? rec.details : undefined,
-    };
+    });
   }
 
   if (raw instanceof Error && raw.message) {
     const nested = tryParseJson(raw.message);
     if (nested) return friendlyComfyError(nested);
-    return { message: raw.message };
+    return wrap({ message: raw.message });
   }
 
   const fallback = parts.find((p) => p.length > 0 && p.length < 400);
-  return {
+  return wrap({
     message: fallback || "Błąd ComfyUI — sprawdź logi na Legionie.",
-  };
+  });
 }
 
 export function formatFriendlyErrorLines(err: FriendlyComfyError): string {
-  return [err.message, err.hint].filter(Boolean).join(" ");
+  return [err.message, err.hint, err.details].filter(Boolean).join(" ");
 }
 
 function extractQuoted(blob: string): string | null {
@@ -179,13 +240,11 @@ function extractDetailSnippet(blob: string): string | undefined {
     .split(/\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 8 && l.length < 220);
-  return lines.find((l) => /mismatch|invalid|video_frames|width|height|image/i.test(l));
+  return lines.find((l) =>
+    /mismatch|invalid|video_frames|width|height|image/i.test(l)
+  );
 }
 
-/**
- * Comfy często zwraca tylko „Prompt outputs failed validation” —
- * wyciągamy z node_errors konkretne pola (image, video_frames, width, height…).
- */
 function explainPromptValidationFailure(
   raw: unknown,
   blob: string
@@ -197,80 +256,40 @@ function explainPromptValidationFailure(
     );
   if (!isValidation) return null;
 
-  if (/Invalid image file/i.test(blob) || (/Value not in list/i.test(blob) && /image/i.test(blob))) {
-    const name = blob.match(/Invalid image file:\s*(.+)/i)?.[1]?.trim() ||
+  const dump = summarizeNodeErrors(asRecord(raw)?.node_errors);
+
+  if (
+    /Invalid image file/i.test(blob) ||
+    (/Value not in list/i.test(blob) && /image/i.test(blob))
+  ) {
+    const name =
+      blob.match(/Invalid image file:\s*(.+)/i)?.[1]?.trim() ||
       extractQuoted(blob) ||
       "…";
     return {
       code: "invalid_start_image",
       message: `LoadImage: nieprawidłowy / brakujący plik „${name}” w input.`,
-      hint: "Użyj uploadu lub „Z galerii”. Pliki z output Comfy nie są widoczne dla LoadImage bez skopiowania do input.",
+      hint: "Upload → Comfy /upload/image (input). Do LoadImage idzie basename z odpowiedzi uploadu.",
+      details: dump || undefined,
     };
   }
 
-  const fieldHits: string[] = [];
-  const detailBits: string[] = [];
-  const nodeHints: string[] = [];
-
-  const scan = (value: unknown, path = "") => {
-    if (!value) return;
-    if (typeof value === "string") {
-      if (/video_frames/i.test(value)) fieldHits.push("video_frames");
-      if (/\bwidth\b/i.test(value)) fieldHits.push("width");
-      if (/\bheight\b/i.test(value)) fieldHits.push("height");
-      if (/\bfps\b/i.test(value) || /frame_rate/i.test(value)) fieldHits.push("fps/frame_rate");
-      if (/\bimage\b/i.test(value)) fieldHits.push("image");
-      if (
-        value.length < 280 &&
-        (/must be|max|min|between|invalid|<=|>=|not in list|mismatch/i.test(value) ||
-          /video_frames|width|height|image/i.test(value))
-      ) {
-        detailBits.push(value);
-      }
-      return;
-    }
-    if (Array.isArray(value)) {
-      for (const item of value) scan(item, path);
-      return;
-    }
-    const obj = asRecord(value);
-    if (!obj) return;
-    if (typeof obj.class_type === "string") {
-      nodeHints.push(obj.class_type);
-    }
-    if (typeof obj.details === "string") scan(obj.details, path);
-    if (typeof obj.message === "string") scan(obj.message, path);
-    for (const [k, v] of Object.entries(obj)) {
-      if (/video_frames|width|height|fps|frame_rate|image/i.test(k)) {
-        fieldHits.push(k);
-      }
-      scan(v, path ? `${path}.${k}` : k);
-    }
-  };
-
-  scan(raw);
-
-  const uniqueFields = Array.from(new Set(fieldHits));
-  const uniqueDetails = Array.from(new Set(detailBits)).slice(0, 4);
-  const nodes = Array.from(new Set(nodeHints)).slice(0, 3);
-
-  if (uniqueFields.includes("image") || nodes.includes("LoadImage")) {
+  if (/CLIP|CLIP_VISION/i.test(blob)) {
     return {
-      code: "invalid_start_image",
-      message: "Walidacja LoadImage nie przeszła (obraz startowy).",
-      hint:
-        uniqueDetails.join(" · ") ||
-        "Plik musi istnieć w ComfyUI/input — wgraj go lub wybierz z galerii (auto-kopia).",
+      code: "svd_loader_mismatch",
+      message:
+        "Walidacja: CLIP ≠ CLIP_VISION — użyj ImageOnlyCheckpointLoader dla SVD.",
+      hint: dump || undefined,
+      details: dump || undefined,
     };
   }
 
   return {
     code: "prompt_validation",
-    message: uniqueFields.length
-      ? `Walidacja Comfy nie przeszła — pola: ${uniqueFields.join(", ")}${nodes.length ? ` (nody: ${nodes.join(", ")})` : ""}.`
-      : "Walidacja Comfy nie przeszła (Prompt outputs failed validation).",
+    message: "Walidacja Comfy nie przeszła (Prompt outputs failed validation).",
     hint:
-      uniqueDetails.join(" · ") ||
-      "Częste przyczyny: brak pliku w input (LoadImage), zły typ połączenia, albo wartość poza min/max widgetu.",
+      dump ||
+      "Częste przyczyny: CheckpointLoaderSimple zamiast ImageOnlyCheckpointLoader, albo zła nazwa LoadImage.",
+    details: dump || undefined,
   };
 }

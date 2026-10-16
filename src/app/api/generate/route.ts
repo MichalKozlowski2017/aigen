@@ -52,10 +52,15 @@ export async function POST(request: Request) {
   try {
     let startImage = parsed.data.startImage?.trim();
     let copiedFromOutput = false;
+    let sourceUsed: string | undefined;
     if (parsed.data.kind === "video" && startImage) {
-      const ensured = await ensureStartImageInComfyInput(startImage);
+      const ensured = await ensureStartImageInComfyInput(
+        startImage,
+        parsed.data.startImageSource ?? null
+      );
       startImage = ensured.startImage;
       copiedFromOutput = ensured.copiedFromOutput;
+      sourceUsed = ensured.sourceUsed;
     }
 
     const boost = await preparePromptForModel({
@@ -87,7 +92,13 @@ export async function POST(request: Request) {
       nodeErrors: result.nodeErrors,
       startImage,
       copiedFromOutput,
+      sourceUsed,
       videoPlan,
+      // Debug deploy: potwierdź loader na prod
+      videoLoader:
+        parsed.data.kind === "video"
+          ? (workflow["1"] as { class_type?: string } | undefined)?.class_type
+          : undefined,
       modelPrompt: boost.modelPrompt,
       modelNegative: boost.modelNegative,
       promptBoost: {
@@ -101,14 +112,32 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     const attached = (
-      err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }
+      err as Error & {
+        friendly?: ReturnType<typeof friendlyComfyError>;
+        nodeErrors?: unknown;
+        comfyError?: unknown;
+      }
     ).friendly;
     const friendly = attached ?? friendlyComfyError(err);
+    const nodeErrors =
+      friendly.nodeErrors ??
+      (err as Error & { nodeErrors?: unknown }).nodeErrors ??
+      null;
+    const comfyError =
+      friendly.comfyError ??
+      (err as Error & { comfyError?: unknown }).comfyError ??
+      null;
     return NextResponse.json(
       {
         ok: false,
         error: formatFriendlyErrorLines(friendly),
-        errorDetail: friendly,
+        errorDetail: {
+          ...friendly,
+          nodeErrors,
+          comfyError,
+        },
+        nodeErrors,
+        comfyError,
       },
       { status: 502 }
     );

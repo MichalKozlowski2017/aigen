@@ -92,9 +92,14 @@ export async function enqueuePrompt(
 
   if (!res.ok || !data.prompt_id) {
     const friendly = friendlyComfyError(errorPayload);
-    const err = new Error(formatFriendlyErrorLines(friendly));
-    (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
-      friendly;
+    const err = new Error(formatFriendlyErrorLines(friendly)) as Error & {
+      friendly?: ReturnType<typeof friendlyComfyError>;
+      nodeErrors?: unknown;
+      comfyError?: unknown;
+    };
+    err.friendly = friendly;
+    err.nodeErrors = data.node_errors ?? null;
+    err.comfyError = data.error ?? null;
     throw err;
   }
 
@@ -102,9 +107,14 @@ export async function enqueuePrompt(
     const keys = Object.keys(data.node_errors as object);
     if (keys.length > 0) {
       const friendly = friendlyComfyError(errorPayload);
-      const err = new Error(formatFriendlyErrorLines(friendly));
-      (err as Error & { friendly?: ReturnType<typeof friendlyComfyError> }).friendly =
-        friendly;
+      const err = new Error(formatFriendlyErrorLines(friendly)) as Error & {
+        friendly?: ReturnType<typeof friendlyComfyError>;
+        nodeErrors?: unknown;
+        comfyError?: unknown;
+      };
+      err.friendly = friendly;
+      err.nodeErrors = data.node_errors;
+      err.comfyError = data.error ?? null;
       throw err;
     }
   }
@@ -456,6 +466,30 @@ export function comfyViewUrl(
     type,
   });
   return `${base}/view?${q.toString()}`;
+}
+
+/** Pobierz bajty obrazu z Comfy /view (z timeoutem) — null gdy brak. */
+export async function fetchComfyViewBlob(
+  filename: string,
+  subfolder = "",
+  type = "output"
+): Promise<Blob | null> {
+  try {
+    const q = new URLSearchParams({ filename, subfolder, type });
+    const res = await fetchComfy(`/view?${q.toString()}`, {
+      timeoutMs: 20_000,
+    });
+    if (!res.ok) return null;
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength < 32) return null;
+    const ct = res.headers.get("content-type") || "image/png";
+    if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
+      return null;
+    }
+    return new Blob([buf], { type: ct });
+  } catch {
+    return null;
+  }
 }
 
 /**

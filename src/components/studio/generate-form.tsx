@@ -26,6 +26,16 @@ type ErrorDetail = {
   hint?: string;
   linkHref?: string;
   linkLabel?: string;
+  code?: string;
+  details?: string;
+  nodeErrors?: unknown;
+  comfyError?: unknown;
+};
+
+type StartImageSource = {
+  filename: string;
+  subfolder?: string;
+  type?: string;
 };
 
 type Props = {
@@ -59,6 +69,8 @@ export function GenerateForm({
   const [durationSec, setDurationSec] = useState(2);
   const [fps, setFps] = useState(6);
   const [startImage, setStartImage] = useState("");
+  const [startImageSource, setStartImageSource] =
+    useState<StartImageSource | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -236,6 +248,7 @@ export function GenerateForm({
 
   async function uploadStartFile(file: File) {
     setError(null);
+    setErrorDetail(null);
     setUploadBusy(true);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(URL.createObjectURL(file));
@@ -247,12 +260,20 @@ export function GenerateForm({
       if (!data.ok) {
         setError(data.error ?? "Upload nieudany");
         setStartImage("");
+        setStartImageSource(null);
         return;
       }
+      // Basename z Comfy /upload/image (input) — ta sama nazwa idzie do LoadImage
       setStartImage(data.startImage as string);
+      setStartImageSource({
+        filename: (data.name as string) || (data.startImage as string),
+        subfolder: "",
+        type: "input",
+      });
     } catch {
       setError("Błąd sieci przy uploadzie");
       setStartImage("");
+      setStartImageSource(null);
     } finally {
       setUploadBusy(false);
     }
@@ -269,6 +290,7 @@ export function GenerateForm({
 
   async function importGalleryAsStart(item: GalleryItem) {
     setError(null);
+    setErrorDetail(null);
     setGalleryError(null);
     try {
       const res = await fetch(item.url);
@@ -279,6 +301,7 @@ export function GenerateForm({
       const file = new File([blob], item.name || "gallery-start.png", {
         type: blob.type || item.mime || "image/png",
       });
+      // Re-upload do Comfy input — uploadStartFile ustawia source=input + basename
       await uploadStartFile(file);
       setGalleryOpen(false);
     } catch (err) {
@@ -324,6 +347,9 @@ export function GenerateForm({
           body.durationSec = durationSec;
           body.fps = fps;
           body.startImage = startImage.trim();
+          if (startImageSource) {
+            body.startImageSource = startImageSource;
+          }
         }
         const res = await fetch("/api/generate", {
           method: "POST",
@@ -333,7 +359,23 @@ export function GenerateForm({
         const data = await res.json();
         if (!data.ok) {
           const detail = data.errorDetail as ErrorDetail | undefined;
-          setErrorDetail(detail ?? null);
+          const nodeErrors = data.nodeErrors ?? detail?.nodeErrors;
+          setErrorDetail({
+            message: detail?.message ?? data.error ?? "Generacja nieudana",
+            hint: detail?.hint,
+            linkHref: detail?.linkHref,
+            linkLabel: detail?.linkLabel,
+            code: detail?.code,
+            details:
+              detail?.details ||
+              (nodeErrors
+                ? typeof nodeErrors === "string"
+                  ? nodeErrors
+                  : JSON.stringify(nodeErrors, null, 2)
+                : undefined),
+            nodeErrors,
+            comfyError: data.comfyError ?? detail?.comfyError,
+          });
           setError(data.error ?? detail?.message ?? "Generacja nieudana");
           setStatus(null);
           setStartedAtMs(null);
@@ -519,7 +561,10 @@ export function GenerateForm({
               <input
                 type="text"
                 value={startImage}
-                onChange={(e) => setStartImage(e.target.value)}
+                onChange={(e) => {
+                  setStartImage(e.target.value);
+                  setStartImageSource(null);
+                }}
                 placeholder="np. start.png"
                 className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
               />
@@ -719,6 +764,11 @@ export function GenerateForm({
             </p>
             {errorDetail?.hint ? (
               <p className="text-sm text-rose-100/70">{errorDetail.hint}</p>
+            ) : null}
+            {errorDetail?.details ? (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono text-[11px] leading-snug text-rose-100/80">
+                {errorDetail.details}
+              </pre>
             ) : null}
             {errorDetail?.linkHref ? (
               <a
