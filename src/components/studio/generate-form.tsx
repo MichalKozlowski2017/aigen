@@ -16,14 +16,12 @@ import {
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
   estimateVideoFrames,
+  maxLtxDurationAtFps,
   planLtxVideo,
   planSvdVideo,
-  snapLtxLength,
   type VideoEngineId,
 } from "@/lib/studio/workflow-builder";
-import {
-  DEFAULT_LTX_CHECKPOINT,
-} from "@/lib/studio/video-engines";
+import { DEFAULT_LTX_CHECKPOINT } from "@/lib/studio/video-engines";
 
 type JobOutput = {
   filename: string;
@@ -128,6 +126,21 @@ export function GenerateForm({
   const videoFrames =
     videoPlan?.frames ?? estimateVideoFrames(durationSec, fps);
   const videoRisky = Boolean(videoPlan?.vramRisky);
+  const ltxMaxDurationAtFps =
+    kind === "video" && videoEngine === "ltx"
+      ? maxLtxDurationAtFps(fps)
+      : videoLimits.maxDurationSec;
+  const durationInputMax =
+    kind === "video" && videoEngine === "ltx"
+      ? Math.min(LTX_UI_LIMITS.maxDurationSec, ltxMaxDurationAtFps)
+      : videoLimits.maxDurationSec;
+
+  // Gdy FPS się zmienia, nie trzymaj duration powyżej realnego max (frames/fps)
+  useEffect(() => {
+    if (kind !== "video" || videoEngine !== "ltx") return;
+    const cap = Math.min(LTX_UI_LIMITS.maxDurationSec, maxLtxDurationAtFps(fps));
+    if (durationSec > cap) setDurationSec(cap);
+  }, [kind, videoEngine, fps, durationSec]);
 
   function applyVideoEngine(next: VideoEngineId) {
     setVideoEngine(next);
@@ -798,14 +811,19 @@ export function GenerateForm({
             </Field>
           ) : (
             <>
-              <Field label={`Czas (s, max ${videoLimits.maxDurationSec})`}>
+              <Field
+                label={`Czas zadany (s, max ${durationInputMax} @ ${fps} FPS)`}
+              >
                 <input
                   type="number"
                   min={1}
-                  max={videoLimits.maxDurationSec}
+                  max={durationInputMax}
                   step={0.5}
                   value={durationSec}
-                  onChange={(e) => setDurationSec(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setDurationSec(Math.min(next, durationInputMax));
+                  }}
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
@@ -823,36 +841,46 @@ export function GenerateForm({
           )}
         </div>
 
-        {kind === "video" ? (
+        {kind === "video" && videoPlan ? (
           <div className="space-y-1.5 text-sm">
-            <p className="text-stone-400">
-              Klatki ≈{" "}
-              <span className="font-mono text-stone-200">{videoFrames}</span>
+            <p className="text-stone-200">
+              Wyjdzie{" "}
+              <span className="font-mono text-teal-100">
+                {videoPlan.effectiveDurationSec}s
+              </span>{" "}
+              (
+              <span className="font-mono">{videoPlan.frames}</span> klatek @{" "}
+              <span className="font-mono">{videoPlan.fps}</span> FPS)
               {videoEngine === "ltx" ? (
                 <span className="text-stone-500">
                   {" "}
-                  (LTX length 8n+1, snap{" "}
-                  {snapLtxLength(estimateVideoFrames(durationSec, fps))})
+                  · LTX length 8n+1 (np. 49/73/97/121)
                 </span>
-              ) : (
-                <span className="text-stone-500">
-                  {" "}
-                  ({durationSec}s × {fps} FPS)
-                </span>
-              )}
-              {videoLimitsNote ? (
-                <span className="text-stone-500"> · {videoLimitsNote}</span>
               ) : null}
             </p>
+            {videoPlan.durationClamped ? (
+              <p className="text-amber-200/85">
+                Zadany czas przekracza max {videoPlan.maxDurationAtFps}s przy{" "}
+                {videoPlan.fps} FPS (limit {videoEngine === "ltx"
+                  ? `${LTX_UI_LIMITS.maxLength} klatek`
+                  : "UI"}
+                ) — wysyłamy {videoPlan.frames} klatek /{" "}
+                {videoPlan.effectiveDurationSec}s.
+              </p>
+            ) : null}
+            {videoLimitsNote ? (
+              <p className="text-stone-500">{videoLimitsNote}</p>
+            ) : null}
             <p className="text-stone-500">
               Start frame w Comfy <code className="text-stone-400">input</code> —
-              upload / „Z galerii”. {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
+              upload / „Z galerii”.{" "}
+              {videoEngine === "ltx" ? LTX_UI_LIMITS.note : SVD_UI_LIMITS.note}
             </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
                 {videoEngine === "ltx"
-                  ? `Uwaga VRAM (~16 GB): LTX powyżej ~${LTX_UI_LIMITS.comfortLength} klatek / ${LTX_UI_LIMITS.comfortDurationSec}s często OOM. Skróć czas albo rozdzielczość.`
-                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM. LTX jest lepszy jakościowo przy krótkich klipach.`}
+                  ? `Uwaga VRAM (~16 GB): powyżej ~${LTX_UI_LIMITS.comfortLength} klatek (~${(LTX_UI_LIMITS.comfortLength / fps).toFixed(1)}s @ ${fps} FPS) ryzyko OOM. Legion smoke: 121 OK @ 768×512.`
+                  : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
               </p>
             ) : null}
           </div>

@@ -18,6 +18,8 @@ import {
   DEFAULT_VIDEO_ENGINE,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
+  effectiveDurationSec,
+  maxLtxDurationAtFps,
   snapLtxLength,
   type VideoEngineId,
 } from "./video-engines";
@@ -36,6 +38,8 @@ export {
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
   snapLtxLength,
+  maxLtxDurationAtFps,
+  effectiveDurationSec,
   type VideoEngineId,
 } from "./video-engines";
 
@@ -191,8 +195,15 @@ export type VideoPlan = {
   width: number;
   height: number;
   fps: number;
+  /** Czas zadany przez usera (po clamp UI). */
   durationSec: number;
+  /** Faktyczna długość pliku = frames/fps (to idzie do Comfy / VHS). */
+  effectiveDurationSec: number;
   frames: number;
+  /** true gdy zadany czas > to co maxLength pozwala przy tym FPS */
+  durationClamped: boolean;
+  /** Max s przy bieżącym FPS */
+  maxDurationAtFps: number;
   vramRisky: boolean;
 };
 
@@ -232,14 +243,17 @@ export function planSvdVideo(body: {
     Math.max(Math.round(body.fps ?? SVD_UI_LIMITS.defaultFps), 1),
     SVD_UI_LIMITS.maxFps
   );
-  const durationSec = Math.min(
-    Math.max(body.durationSec ?? SVD_UI_LIMITS.defaultDurationSec, 1),
-    SVD_UI_LIMITS.maxDurationSec
+  const maxDurationAtFps = SVD_UI_LIMITS.maxDurationSec;
+  const requested = Math.max(
+    body.durationSec ?? SVD_UI_LIMITS.defaultDurationSec,
+    1
   );
+  const durationSec = Math.min(requested, maxDurationAtFps);
   const frames = Math.min(
     estimateVideoFrames(durationSec, fps),
     SVD_UI_LIMITS.schemaMaxFrames
   );
+  const effective = effectiveDurationSec(frames, fps);
 
   return {
     engine: "svd",
@@ -247,10 +261,13 @@ export function planSvdVideo(body: {
     height: Math.max(16, height),
     fps,
     durationSec,
+    effectiveDurationSec: effective,
     frames,
+    durationClamped: requested > maxDurationAtFps + 0.05,
+    maxDurationAtFps,
     vramRisky:
       frames > SVD_UI_LIMITS.comfortFrames ||
-      durationSec > SVD_UI_LIMITS.comfortDurationSec ||
+      effective > SVD_UI_LIMITS.comfortDurationSec ||
       fps > SVD_UI_LIMITS.comfortFps,
   };
 }
@@ -277,11 +294,22 @@ export function planLtxVideo(body: {
     Math.max(Math.round(body.fps ?? LTX_UI_LIMITS.defaultFps), 1),
     LTX_UI_LIMITS.maxFps
   );
+  const maxDurationAtFps = maxLtxDurationAtFps(fps);
+  const requested = Math.max(
+    body.durationSec ?? LTX_UI_LIMITS.defaultDurationSec,
+    1
+  );
+  // Nie pozwól UI „obiecać” więcej niż maxLength/fps
   const durationSec = Math.min(
-    Math.max(body.durationSec ?? LTX_UI_LIMITS.defaultDurationSec, 1),
+    requested,
+    maxDurationAtFps,
     LTX_UI_LIMITS.maxDurationSec
   );
-  const frames = snapLtxLength(estimateVideoFrames(durationSec, fps));
+  const requestedFrames = estimateVideoFrames(requested, fps);
+  const frames = snapLtxLength(
+    estimateVideoFrames(durationSec, fps)
+  );
+  const effective = effectiveDurationSec(frames, fps);
 
   return {
     engine: "ltx",
@@ -289,10 +317,15 @@ export function planLtxVideo(body: {
     height: Math.max(64, height),
     fps,
     durationSec,
+    effectiveDurationSec: effective,
     frames,
+    durationClamped:
+      requestedFrames > LTX_UI_LIMITS.maxLength ||
+      requested > maxDurationAtFps + 0.05,
+    maxDurationAtFps,
     vramRisky:
       frames > LTX_UI_LIMITS.comfortLength ||
-      durationSec > LTX_UI_LIMITS.comfortDurationSec,
+      effective > LTX_UI_LIMITS.comfortDurationSec,
   };
 }
 
