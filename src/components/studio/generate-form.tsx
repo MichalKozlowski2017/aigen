@@ -821,16 +821,37 @@ export function GenerateForm({
           )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {outputs.map((o) => {
-              const src = `/api/comfy-view?filename=${encodeURIComponent(o.filename)}&subfolder=${encodeURIComponent(o.subfolder)}&type=${encodeURIComponent(o.type)}`;
+              const q = new URLSearchParams({
+                filename: o.filename,
+                subfolder: o.subfolder || "",
+                type: o.type || "output",
+              });
+              const src = `/api/comfy-view?${q.toString()}`;
               const isVideo = /\.(mp4|webm|mov)$/i.test(o.filename);
               return (
-                <div key={`${o.subfolder}/${o.filename}`} className="overflow-hidden rounded-lg">
+                <div
+                  key={`${o.subfolder}/${o.filename}`}
+                  className="space-y-2 overflow-hidden rounded-lg"
+                >
                   {isVideo ? (
-                    <video src={src} controls className="w-full bg-black/40" />
+                    <video
+                      src={src}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="w-full bg-black/40"
+                    />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={src} alt={o.filename} className="w-full object-cover" />
                   )}
+                  <a
+                    href={src}
+                    download={o.filename}
+                    className="inline-block text-xs text-teal-200/90 underline-offset-2 hover:underline"
+                  >
+                    Pobierz {o.filename}
+                  </a>
                 </div>
               );
             })}

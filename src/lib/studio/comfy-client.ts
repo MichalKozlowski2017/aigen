@@ -1,4 +1,5 @@
 import { friendlyComfyError, formatFriendlyErrorLines } from "./comfy-errors";
+import { normalizeComfyMediaRef } from "./comfy-media";
 import { getComfyUrl } from "./config";
 import type { ComfyHealth } from "./types";
 
@@ -210,11 +211,14 @@ function extractOutputs(entry: unknown): JobStatus["outputs"] {
           type?: string;
         };
         if (rec.filename) {
-          list.push({
-            filename: rec.filename,
-            subfolder: rec.subfolder ?? "",
-            type: rec.type ?? "output",
-          });
+          // VHS: subfolder=studio jest wymagany dla /view
+          list.push(
+            normalizeComfyMediaRef(
+              rec.filename,
+              rec.subfolder ?? "",
+              rec.type ?? "output"
+            )
+          );
         }
       }
     }
