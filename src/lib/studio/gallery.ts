@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { getHistory } from "./comfy-client";
 import { outputRoot, resolveOutputFile } from "./paths";
 import type { GalleryItem } from "./types";
 
@@ -34,6 +35,15 @@ function kindFor(ext: string): GalleryItem["kind"] {
   return "other";
 }
 
+function comfyViewProxyUrl(
+  filename: string,
+  subfolder: string,
+  type: string
+): string {
+  const q = new URLSearchParams({ filename, subfolder, type });
+  return `/api/comfy-view?${q.toString()}`;
+}
+
 async function walk(
   dir: string,
   root: string,
@@ -57,7 +67,100 @@ async function walk(
   }
 }
 
-export async function listGallery(options: {
+function extractOutputsFromHistoryEntry(
+  entry: unknown
+): Array<{ filename: string; subfolder: string; type: string }> {
+  if (!entry || typeof entry !== "object") return [];
+  const outputs = (entry as { outputs?: Record<string, unknown> }).outputs;
+  if (!outputs) return [];
+  const list: Array<{ filename: string; subfolder: string; type: string }> = [];
+  for (const nodeOut of Object.values(outputs)) {
+    if (!nodeOut || typeof nodeOut !== "object") continue;
+    const images = (nodeOut as { images?: unknown[] }).images;
+    const gifs = (nodeOut as { gifs?: unknown[] }).gifs;
+    const videos = (nodeOut as { videos?: unknown[] }).videos;
+    for (const bucket of [images, gifs, videos]) {
+      if (!Array.isArray(bucket)) continue;
+      for (const item of bucket) {
+        if (!item || typeof item !== "object") continue;
+        const rec = item as {
+          filename?: string;
+          subfolder?: string;
+          type?: string;
+        };
+        if (rec.filename) {
+          list.push({
+            filename: rec.filename,
+            subfolder: rec.subfolder ?? "",
+            type: rec.type ?? "output",
+          });
+        }
+      }
+    }
+  }
+  return list;
+}
+
+/**
+ * Galeria z historii ComfyUI (przez COMFYUI_URL / tunel) — działa na Vercel.
+ */
+export async function listGalleryFromComfy(options: {
+  kind?: "all" | "image" | "video";
+  limit?: number;
+}): Promise<{ items: GalleryItem[]; error: string | null }> {
+  try {
+    const history = (await getHistory()) as Record<string, unknown>;
+    const kindFilter = options.kind ?? "all";
+    const limit = options.limit ?? 60;
+    const seen = new Set<string>();
+    const items: GalleryItem[] = [];
+    let order = 0;
+
+    for (const [promptId, entry] of Object.entries(history)) {
+      const outs = extractOutputsFromHistoryEntry(entry);
+      for (const o of outs) {
+        const key = `${o.type}/${o.subfolder}/${o.filename}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const ext = path.extname(o.filename).toLowerCase();
+        const kind = kindFor(ext);
+        if (kind === "other") continue;
+        if (kindFilter !== "all" && kind !== kindFilter) continue;
+        order += 1;
+        items.push({
+          id: `comfy:${key}`,
+          name: o.filename,
+          relativePath: key,
+          mime: mimeFor(ext),
+          kind,
+          sizeBytes: 0,
+          mtimeMs: Date.now() - order,
+          url: comfyViewProxyUrl(o.filename, o.subfolder, o.type),
+          source: "comfy",
+          comfy: {
+            filename: o.filename,
+            subfolder: o.subfolder,
+            type: o.type,
+          },
+        });
+      }
+      void promptId;
+    }
+
+    items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return { items: items.slice(0, limit), error: null };
+  } catch (err) {
+    return {
+      items: [],
+      error:
+        err instanceof Error
+          ? `Galeria Comfy: ${err.message}`
+          : "Nie udało się odczytać historii ComfyUI",
+    };
+  }
+}
+
+async function listGalleryFromDisk(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
 }): Promise<{ items: GalleryItem[]; configured: boolean; error: string | null }> {
@@ -66,8 +169,7 @@ export async function listGallery(options: {
     return {
       items: [],
       configured: false,
-      error:
-        "Ustaw COMFYUI_OUTPUT_DIR w .env.local, aby czytać galerię z dysku.",
+      error: null,
     };
   }
 
@@ -104,6 +206,7 @@ export async function listGallery(options: {
           sizeBytes: st.size,
           mtimeMs: st.mtimeMs,
           url: `/api/gallery/file?path=${encodeURIComponent(f.rel)}`,
+          source: "local",
         };
         return item;
       } catch {
@@ -118,6 +221,50 @@ export async function listGallery(options: {
     .slice(0, limit);
 
   return { items, configured: true, error: null };
+}
+
+/**
+ * Preferuje lokalny COMFYUI_OUTPUT_DIR; na Vercel/bez ścieżki — historia Comfy przez tunel.
+ */
+export async function listGallery(options: {
+  kind?: "all" | "image" | "video";
+  limit?: number;
+}): Promise<{
+  items: GalleryItem[];
+  configured: boolean;
+  error: string | null;
+  source: "local" | "comfy" | "none";
+}> {
+  const disk = await listGalleryFromDisk(options);
+  if (disk.configured && !disk.error) {
+    return { ...disk, source: "local" };
+  }
+  if (disk.configured && disk.error && disk.items.length > 0) {
+    return { ...disk, source: "local" };
+  }
+
+  const comfy = await listGalleryFromComfy(options);
+  if (comfy.items.length > 0 || !comfy.error) {
+    return {
+      items: comfy.items,
+      configured: true,
+      error: comfy.error,
+      source: "comfy",
+    };
+  }
+
+  if (disk.configured) {
+    return { ...disk, source: "local" };
+  }
+
+  return {
+    items: [],
+    configured: false,
+    error:
+      comfy.error ??
+      "Brak galerii: ustaw COMFYUI_OUTPUT_DIR (panel lokalny) albo upewnij się, że COMFYUI_URL / tunel działa (produkcja czyta historię Comfy).",
+    source: "none",
+  };
 }
 
 export async function readGalleryFile(

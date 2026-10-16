@@ -19,14 +19,18 @@ export default async function StudioGalleryPage() {
           Galeria
         </h1>
         <p className="max-w-2xl text-stone-400">
-          Pliki z <code className="text-stone-300">COMFYUI_OUTPUT_DIR</code> — obrazy i
-          MP4.
+          {result.source === "comfy"
+            ? "Outputy z historii ComfyUI (przez COMFYUI_URL / tunel) — widać też wyniki z Generuj."
+            : result.source === "local"
+              ? "Pliki z COMFYUI_OUTPUT_DIR — obrazy i MP4."
+              : "Lokalny katalog output albo historia Comfy przez tunel."}
         </p>
       </header>
       <GalleryClient
         initialItems={result.items}
         configured={result.configured}
         message={result.error}
+        source={result.source}
       />
     </div>
   );

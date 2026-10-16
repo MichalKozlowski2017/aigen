@@ -19,8 +19,8 @@ export default async function StudioModelsPage() {
           Modele
         </h1>
         <p className="max-w-2xl text-stone-400">
-          Flux (UNET + CLIP + VAE), SDXL, SVD i LoRA pod ~16 GB VRAM. Pobieranie
-          zapisuje pliki wyłącznie w katalogu ComfyUI models.
+          Flux (UNET + CLIP + VAE), SDXL, SVD i LoRA pod ~16 GB VRAM. Na Vercel status
+          pochodzi z ComfyUI przez tunel; lokalnie możesz też skanować dysk i pobierać.
         </p>
       </header>
       <ModelsClient
@@ -28,6 +28,8 @@ export default async function StudioModelsPage() {
         configured={library.configured}
         message={library.message}
         modelsDir={library.modelsDir}
+        source={library.source}
+        downloadsEnabled={library.downloadsEnabled}
       />
     </div>
   );

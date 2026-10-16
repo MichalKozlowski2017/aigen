@@ -8,20 +8,34 @@ export function ModelsClient({
   configured,
   message,
   modelsDir,
+  source = "none",
+  downloadsEnabled = false,
 }: {
   initialItems: ModelLibraryItem[];
   configured: boolean;
   message: string | null;
   modelsDir: string | null;
+  source?: "local" | "comfy" | "none";
+  downloadsEnabled?: boolean;
 }) {
   const [items, setItems] = useState(initialItems);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [jobs, setJobs] = useState<Record<string, DownloadJob>>({});
+  const [banner, setBanner] = useState(message);
+  const [src, setSrc] = useState(source);
+  const [canDownload, setCanDownload] = useState(downloadsEnabled);
+  const [dir, setDir] = useState(modelsDir);
 
   const refresh = useCallback(async () => {
     const res = await fetch("/api/models");
     const data = await res.json();
-    if (data.ok) setItems(data.items ?? []);
+    if (data.ok) {
+      setItems(data.items ?? []);
+      setBanner(data.message ?? null);
+      setSrc(data.source ?? "none");
+      setCanDownload(Boolean(data.downloadsEnabled));
+      setDir(data.modelsDir ?? null);
+    }
   }, []);
 
   useEffect(() => {
@@ -67,15 +81,41 @@ export function ModelsClient({
 
   return (
     <div className="space-y-6">
-      {!configured ? (
+      {banner ? (
         <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          {message ?? "Ustaw COMFYUI_MODELS_DIR."}
+          {banner}
         </p>
-      ) : (
+      ) : null}
+
+      {src === "local" && dir ? (
         <p className="text-sm text-stone-500">
-          Katalog modeli: <code className="text-stone-300">{modelsDir}</code>
+          Katalog modeli: <code className="text-stone-300">{dir}</code>
         </p>
-      )}
+      ) : null}
+
+      {src === "comfy" ? (
+        <p className="text-sm text-stone-500">
+          Źródło: ComfyUI API (<code className="text-stone-300">/models/…</code> przez{" "}
+          <code className="text-stone-300">COMFYUI_URL</code>). Pobieranie na dysk tylko przy
+          lokalnym <code className="text-stone-300">COMFYUI_MODELS_DIR</code>.
+        </p>
+      ) : null}
+
+      {!configured ? (
+        <p className="text-sm text-stone-500">
+          Brak połączenia z modelami — sprawdź Comfy / tunel albo ustaw lokalny katalog.
+        </p>
+      ) : null}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-stone-300 hover:border-teal-400/40 hover:text-teal-100"
+        >
+          Odśwież listę
+        </button>
+      </div>
 
       <ul className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
         {items.map((item) => {
@@ -113,7 +153,7 @@ export function ModelsClient({
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 <StatusPill status={item.status} />
-                {item.status !== "ready" && configured ? (
+                {item.status !== "ready" && canDownload ? (
                   <button
                     type="button"
                     disabled={busyId === item.id || item.status === "downloading"}

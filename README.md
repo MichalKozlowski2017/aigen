@@ -40,7 +40,7 @@ Otwórz [http://localhost:3000](http://localhost:3000) — pulpit pokazuje stan 
 Panel możesz hostować na **Vercel**, a **ComfyUI** trzymać na stacjonarnym PC (**Legion**, RTX) — połączenie przez **Cloudflare Tunnel** (HTTPS do `127.0.0.1:8188`, bez otwierania portu w routerze).
 
 1. Na Legionie: ComfyUI na `127.0.0.1:8188` + tunel `cloudflared` wskazujący na ten adres.
-2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`.
+2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`. **Nie** ustawiaj `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` na Vercel — panel czyta modele (`/models/…`) i galerię (historia Comfy) przez tunel.
 3. Deploy — zdalny dostęp do panelu; generacja działa, gdy Legion, tunel i ComfyUI są online.
 
 Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
@@ -49,9 +49,9 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 
 | Zmienna | Opis |
 |---------|------|
-| `COMFYUI_URL` | Adres API ComfyUI (domyślnie `http://127.0.0.1:8188`) |
-| `COMFYUI_MODELS_DIR` | Katalog `models` ComfyUI (checkpoints, itd.) |
-| `COMFYUI_OUTPUT_DIR` | Katalog `output` ComfyUI (galeria) |
+| `COMFYUI_URL` | Adres API ComfyUI (localhost albo URL tunelu na Vercel) |
+| `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
+| `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel galeria = historia Comfy |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |
 
 ## Skrypty

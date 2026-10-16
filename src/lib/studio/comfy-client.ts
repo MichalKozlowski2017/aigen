@@ -207,6 +207,52 @@ export function comfyViewUrl(
   return `${base}/view?${q.toString()}`;
 }
 
+/**
+ * Lista plików w folderze modeli ComfyUI (GET /models/{folder}).
+ * Zwraca same nazwy plików (lokalny Comfy) albo wyciąga `.name` z formatu cloud.
+ */
+export async function listComfyModelFolder(
+  folder: string
+): Promise<string[]> {
+  const res = await fetchComfy(`/models/${encodeURIComponent(folder)}`, {
+    timeoutMs: 10_000,
+  });
+  if (!res.ok) {
+    throw new Error(`Comfy /models/${folder} HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!Array.isArray(data)) return [];
+  const names: string[] = [];
+  for (const item of data) {
+    if (typeof item === "string" && item.trim()) {
+      names.push(item.trim());
+      continue;
+    }
+    if (item && typeof item === "object" && "name" in item) {
+      const n = String((item as { name: unknown }).name ?? "").trim();
+      if (n) names.push(n);
+    }
+  }
+  return names;
+}
+
+/** Lista dostępnych typów folderów modeli (GET /models). */
+export async function listComfyModelFolders(): Promise<string[]> {
+  const res = await fetchComfy("/models", { timeoutMs: 8_000 });
+  if (!res.ok) throw new Error(`Comfy /models HTTP ${res.status}`);
+  const data = (await res.json()) as unknown;
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((x) => {
+      if (typeof x === "string") return x;
+      if (x && typeof x === "object" && "name" in x) {
+        return String((x as { name: unknown }).name ?? "");
+      }
+      return "";
+    })
+    .filter(Boolean);
+}
+
 export type ComfyUploadResult = {
   name: string;
   subfolder: string;
