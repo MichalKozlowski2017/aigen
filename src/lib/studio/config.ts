@@ -14,6 +14,16 @@ export function getComfyUrl(): string {
   return trimOrUndefined(process.env.COMFYUI_URL) ?? DEFAULT_COMFY_URL;
 }
 
+/** true gdy COMFYUI_URL to tunel / zdalny host (nie localhost / 127.0.0.1). */
+export function isRemoteComfyUrl(url: string = getComfyUrl()): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host !== "localhost" && host !== "127.0.0.1" && host !== "::1";
+  } catch {
+    return !/localhost|127\.0\.0\.1/i.test(url);
+  }
+}
+
 export function getModelsDir(): string | null {
   return trimOrUndefined(process.env.COMFYUI_MODELS_DIR) ?? null;
 }
@@ -43,8 +53,10 @@ export function getDefaultImageModel(): string {
 export function getStudioPublicConfig(): StudioPublicConfig {
   const modelsDir = getModelsDir();
   const outputDir = getOutputDir();
+  const comfyUrl = getComfyUrl();
   return {
-    comfyUrl: getComfyUrl(),
+    comfyUrl,
+    comfyRemote: isRemoteComfyUrl(comfyUrl),
     modelsDirConfigured: Boolean(modelsDir),
     outputDirConfigured: Boolean(outputDir),
     modelsDir,

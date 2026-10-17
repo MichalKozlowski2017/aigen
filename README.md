@@ -65,8 +65,8 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 
 ## RTX 5080 — praktyczne limity (~16 GB VRAM)
 
-- **Obraz (SDXL):** 1024², batch 1–2
-- **Wideo (SVD):** krótkie klipy, rozdzielczość ≤ 576 px, niski FPS — patrz `docs/studio-setup.md`
+- **Obraz (Flux.2 Dev fp8):** domyślnie; SDXL opcjonalnie w dropdownie
+- **Wideo (Wan I2V):** Fast 480p (domyślnie) + opcjonalny Smooth 24 (RIFE); patrz `docs/studio-setup.md`
 
 Nie commituj plików `.safetensors` / `.ckpt`.
 

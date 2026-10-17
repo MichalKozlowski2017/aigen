@@ -5,19 +5,36 @@ export const dynamic = "force-dynamic";
 export default function StudioSettingsPage() {
   const config = getStudioPublicConfig();
 
+  const modelsDirValue = config.modelsDir
+    ? config.modelsDir
+    : config.comfyRemote
+      ? "(nie potrzebne — status modeli przez COMFYUI_URL / API)"
+      : "(nie ustawiono)";
+
+  const outputDirValue = config.outputDir
+    ? config.outputDir
+    : config.comfyRemote
+      ? "(nie potrzebne — galeria przez historię Comfy / API)"
+      : "(nie ustawiono)";
+
   const rows: { label: string; value: string }[] = [
-    { label: "COMFYUI_URL", value: config.comfyUrl },
+    {
+      label: "COMFYUI_URL",
+      value: `${config.comfyUrl} (${config.comfyRemote ? "zdalny" : "lokalny"})`,
+    },
     {
       label: "COMFYUI_MODELS_DIR",
-      value: config.modelsDir ?? "(nie ustawiono)",
+      value: modelsDirValue,
     },
     {
       label: "COMFYUI_OUTPUT_DIR",
-      value: config.outputDir ?? "(nie ustawiono)",
+      value: outputDirValue,
     },
     {
       label: "STUDIO_PASSWORD",
-      value: config.passwordRequired ? "ustawione (ukryte)" : "wyłączone — otwarty dostęp lokalny",
+      value: config.passwordRequired
+        ? "ustawione (ukryte)"
+        : "wyłączone — otwarty dostęp",
     },
     {
       label: "Domyślny model obrazu",
@@ -39,8 +56,11 @@ export default function StudioSettingsPage() {
           Ustawienia
         </h1>
         <p className="max-w-2xl text-stone-400">
-          Wartości tylko do odczytu z serwera. Sekretów nie pokazujemy — zmień je w{" "}
-          <code className="text-stone-300">.env.local</code>.
+          Wartości tylko do odczytu z serwera. Primarny łącznik:{" "}
+          <code className="text-stone-300">COMFYUI_URL</code>
+          {config.comfyRemote
+            ? " (tunel / Vercel). Ścieżki MODELS/OUTPUT są tylko dla panelu lokalnego."
+            : ". Sekretów nie pokazujemy — zmień je w .env.local."}
         </p>
       </header>
 

@@ -19,17 +19,17 @@ export default async function StudioDashboardPage() {
         <DashLink
           href="/generate"
           title="Nowy obraz"
-          desc="SDXL txt2img — prompt, model, seed."
+          desc="Flux.2 Dev (fp8) — prompt, model, seed. Limit ~16 GB VRAM."
         />
         <DashLink
           href="/video"
           title="Wideo"
-          desc="Krótki img2vid z limitami 16 GB VRAM."
+          desc="Wan I2V Fast 480p (+ Smooth 24 / RIFE) — limity 16 GB."
         />
         <DashLink
           href="/models"
           title="Modele"
-          desc="Katalog polecanych wag i pobieranie."
+          desc="Katalog polecanych wag i status przez Comfy API."
         />
       </section>
 
@@ -42,22 +42,37 @@ export default async function StudioDashboardPage() {
         </h2>
         <ul className="space-y-1 text-sm text-stone-500">
           <li>
-            ComfyUI: <code className="text-stone-300">{config.comfyUrl}</code>
+            ComfyUI ({config.comfyRemote ? "zdalny" : "lokalny"}):{" "}
+            <code className="text-stone-300">{config.comfyUrl}</code>
           </li>
           <li>
             Modele:{" "}
             {config.modelsDirConfigured ? (
               <code className="text-stone-300">{config.modelsDir}</code>
+            ) : config.comfyRemote ? (
+              <span className="text-stone-400">
+                zdalny Comfy — status wag przez API (
+                <code className="text-stone-300">COMFYUI_URL</code>)
+              </span>
             ) : (
-              <span className="text-amber-200/80">nie ustawiono COMFYUI_MODELS_DIR</span>
+              <span className="text-amber-200/80">
+                nie ustawiono COMFYUI_MODELS_DIR
+              </span>
             )}
           </li>
           <li>
-            Output:{" "}
+            Output / galeria:{" "}
             {config.outputDirConfigured ? (
               <code className="text-stone-300">{config.outputDir}</code>
+            ) : config.comfyRemote ? (
+              <span className="text-stone-400">
+                galeria przez API / historię Comfy (
+                <code className="text-stone-300">COMFYUI_URL</code>)
+              </span>
             ) : (
-              <span className="text-amber-200/80">nie ustawiono COMFYUI_OUTPUT_DIR</span>
+              <span className="text-amber-200/80">
+                nie ustawiono COMFYUI_OUTPUT_DIR
+              </span>
             )}
           </li>
         </ul>

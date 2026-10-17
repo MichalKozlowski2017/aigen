@@ -1,9 +1,15 @@
 import Link from "next/link";
+import { getStudioPublicConfig } from "@/lib/studio/config";
 import { StudioBackdrop } from "./studio-backdrop";
 import { StudioNav } from "./studio-nav";
 import { studioDisplay, studioSans } from "./studio-fonts";
 
 export function StudioChrome({ children }: { children: React.ReactNode }) {
+  const config = getStudioPublicConfig();
+  const footerNote = config.comfyRemote
+    ? "Panel steruje zdalnym ComfyUI przez COMFYUI_URL (tunel)."
+    : "Panel steruje lokalnym ComfyUI (COMFYUI_URL).";
+
   return (
     <div
       className={`${studioDisplay.variable} ${studioSans.variable} studio-shell relative flex min-h-full flex-col text-stone-100`}
@@ -29,9 +35,7 @@ export function StudioChrome({ children }: { children: React.ReactNode }) {
         {children}
       </main>
       <footer className="mx-auto w-full max-w-6xl px-4 pb-10 sm:px-6">
-        <p className="text-xs text-stone-500">
-          Panel steruje lokalnym ComfyUI (localhost).
-        </p>
+        <p className="text-xs text-stone-500">{footerNote}</p>
       </footer>
     </div>
   );
