@@ -487,10 +487,46 @@ export async function fetchComfyViewBlob(
     const buf = await res.arrayBuffer();
     if (buf.byteLength < 32) return null;
     const ct = res.headers.get("content-type") || "image/png";
+    // Obrazy/wideo — odrzuć HTML/JSON (błędy proxy). Tekst/JSON: fetchComfyViewText.
     if (ct.includes("json") || ct.includes("text") || ct.includes("html")) {
       return null;
     }
     return new Blob([buf], { type: ct });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pobierz treść tekstową/JSON z Comfy /view (np. stan pipeline w input/).
+ * W przeciwieństwie do fetchComfyViewBlob NIE odrzuca content-type json/text.
+ */
+export async function fetchComfyViewText(
+  filename: string,
+  subfolder = "",
+  type = "input",
+  options?: { timeoutMs?: number; minBytes?: number }
+): Promise<string | null> {
+  try {
+    const q = new URLSearchParams({ filename, subfolder, type });
+    const res = await fetchComfy(`/view?${q.toString()}`, {
+      timeoutMs: options?.timeoutMs ?? 20_000,
+    });
+    if (!res.ok) return null;
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (ct.includes("html")) return null;
+    const text = await res.text();
+    const min = options?.minBytes ?? 2;
+    if (text.length < min) return null;
+    const trimmed = text.trimStart();
+    if (
+      trimmed.startsWith("<!DOCTYPE") ||
+      trimmed.startsWith("<html") ||
+      trimmed.startsWith("<HTML")
+    ) {
+      return null;
+    }
+    return text;
   } catch {
     return null;
   }
@@ -549,18 +585,18 @@ export type ComfyUploadResult = {
 };
 
 /**
- * Upload obrazu do ComfyUI input (POST /upload/image).
- * Zwraca nazwę pliku do LoadImage / startImage.
+ * Upload pliku do ComfyUI (POST /upload/image) — działa też dla JSON/txt/mp4.
+ * Domyślnie type=input (trwały katalog na hoście Comfy, przeżywa cold start Vercel).
  */
-export async function uploadImageToComfy(
+export async function uploadFileToComfy(
   file: Blob,
   filename: string,
-  options?: { overwrite?: boolean; subfolder?: string }
+  options?: { overwrite?: boolean; subfolder?: string; type?: string }
 ): Promise<ComfyUploadResult> {
   const form = new FormData();
   form.append("image", file, filename);
   form.append("overwrite", options?.overwrite === false ? "false" : "true");
-  form.append("type", "input");
+  form.append("type", options?.type ?? "input");
   if (options?.subfolder) {
     form.append("subfolder", options.subfolder);
   }
@@ -585,6 +621,18 @@ export async function uploadImageToComfy(
   return {
     name: data.name,
     subfolder: data.subfolder ?? "",
-    type: data.type ?? "input",
+    type: data.type ?? options?.type ?? "input",
   };
+}
+
+/**
+ * Upload obrazu do ComfyUI input (POST /upload/image).
+ * Zwraca nazwę pliku do LoadImage / startImage.
+ */
+export async function uploadImageToComfy(
+  file: Blob,
+  filename: string,
+  options?: { overwrite?: boolean; subfolder?: string }
+): Promise<ComfyUploadResult> {
+  return uploadFileToComfy(file, filename, options);
 }

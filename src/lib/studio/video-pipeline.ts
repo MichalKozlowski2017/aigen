@@ -1,7 +1,7 @@
 /**
  * Serwerowa orkiestracja chunków Wan/LTX: c0 → last-frame → c1… → ffmpeg stitch.
- * Stan maszyny jest trzymany w pamięci procesu + /tmp + (best-effort) Comfy input,
- * a każdy GET /api/video/pipeline/[id] robi tick — browser nie jest SPOF dla c1/stitch.
+ * Stan: pamięć procesu + /tmp + durable JSON w Comfy input/ (przeżywa cold start Vercel).
+ * GET /api/video/pipeline/[id] rehydrate z Comfy przy miss, potem tick (advance).
  */
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
@@ -9,11 +9,11 @@ import os from "node:os";
 import path from "node:path";
 import {
   enqueuePrompt,
-  fetchComfyViewBlob,
+  fetchComfyViewText,
   getJobStatus,
   type JobProgress,
   type JobStatus,
-  uploadImageToComfy,
+  uploadFileToComfy,
 } from "./comfy-client";
 import { ensureStartImageInComfyInput } from "./ensure-start-image";
 import type { LtxChunkPlan } from "./ltx-chunks";
@@ -60,6 +60,10 @@ export type VideoPipelineState = {
   postProcessWarnings?: string[];
   /** Lease przeciw podwójnemu enqueue przy concurrent poll (ms epoch). */
   advancingUntil?: number;
+  /** Ostatni udany zapis durable do Comfy input (ms epoch). */
+  durableSavedAt?: number;
+  /** Nazwa pliku stanu w Comfy input (json lub txt fallback). */
+  durableFilename?: string;
 };
 
 type PipelineStore = Map<string, VideoPipelineState>;
@@ -113,8 +117,24 @@ function tmpPath(id: string): string {
   return path.join(tmpDir(), `${id}.json`);
 }
 
-function comfyStateFilename(id: string): string {
-  return `aigen-pipeline-${id}.json`;
+function comfyStateFilenames(id: string): string[] {
+  // .json preferowane; .txt gdy Comfy/proxy odrzuca rozszerzenie json
+  return [`aigen-pipeline-${id}.json`, `aigen-pipeline-${id}.txt`];
+}
+
+function parsePipelineState(
+  raw: string,
+  id: string
+): VideoPipelineState | null {
+  try {
+    const parsed = JSON.parse(raw) as VideoPipelineState;
+    if (parsed?.id === id && parsed.plan && parsed.body) {
+      return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
@@ -136,25 +156,98 @@ function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
   };
 }
 
+/**
+ * Durable zapis do Comfy input — jedyne źródło prawdy po cold start / redeploy Vercel.
+ * Zwraca true gdy upload się udał (read-back opcjonalny przy checkpointach).
+ */
+async function persistToComfy(
+  state: VideoPipelineState,
+  options?: { verify?: boolean }
+): Promise<boolean> {
+  const payload = JSON.stringify(state);
+  const preferred = state.durableFilename;
+  const names = preferred
+    ? [preferred, ...comfyStateFilenames(state.id).filter((n) => n !== preferred)]
+    : comfyStateFilenames(state.id);
+
+  for (const name of names) {
+    try {
+      const blob = new Blob([payload], { type: "application/octet-stream" });
+      const uploaded = await uploadFileToComfy(blob, name, {
+        overwrite: true,
+        type: "input",
+      });
+      const savedName = uploaded.name || name;
+      if (options?.verify) {
+        const back = await fetchComfyViewText(savedName, "", "input", {
+          timeoutMs: 15_000,
+        });
+        const parsed = back ? parsePipelineState(back, state.id) : null;
+        if (!parsed) continue;
+      }
+      state.durableFilename = savedName;
+      state.durableSavedAt = Date.now();
+      return true;
+    } catch {
+      // spróbuj kolejnej nazwy
+    }
+  }
+  return false;
+}
+
+/** Checkpoint-y: zmiana chunka / promptu / statusu terminalnego — warto verify. */
+function isDurableCheckpoint(
+  prev: VideoPipelineState | undefined,
+  next: VideoPipelineState
+): boolean {
+  if (!prev) return true;
+  if (prev.status !== next.status) return true;
+  if (prev.chunkIndex !== next.chunkIndex) return true;
+  if (prev.currentPromptId !== next.currentPromptId) return true;
+  if (prev.clips.length !== next.clips.length) return true;
+  return false;
+}
+
 async function persist(state: VideoPipelineState): Promise<void> {
+  const prev = store().get(state.id);
+  const checkpoint = isDurableCheckpoint(prev, state);
   state.updatedAt = Date.now();
   store().set(state.id, state);
   try {
     await fs.mkdir(tmpDir(), { recursive: true });
     await fs.writeFile(tmpPath(state.id), JSON.stringify(state), "utf8");
   } catch {
-    // /tmp best-effort
+    // /tmp best-effort (ginie na Vercel)
   }
-  try {
-    const blob = new Blob([JSON.stringify(state)], {
-      type: "application/json",
-    });
-    await uploadImageToComfy(blob, comfyStateFilename(state.id), {
-      overwrite: true,
-    });
-  } catch {
-    // Comfy może odrzucić non-image — OK, pamięć+/tmp wystarczy na warm instance
+  // Durable tylko na checkpointach (enqueue / chunk done / stitch / fail) —
+  // progress tick nie spamuje Comfy, a cold start i tak wznawia z ostatniego checkpointu.
+  if (checkpoint) {
+    await persistToComfy(state, { verify: true });
+    store().set(state.id, state);
+    try {
+      await fs.writeFile(tmpPath(state.id), JSON.stringify(state), "utf8");
+    } catch {
+      // ignore
+    }
   }
+}
+
+async function loadFromComfy(id: string): Promise<VideoPipelineState | null> {
+  for (const name of comfyStateFilenames(id)) {
+    try {
+      const text = await fetchComfyViewText(name, "", "input", {
+        timeoutMs: 20_000,
+      });
+      const parsed = text ? parsePipelineState(text, id) : null;
+      if (parsed) {
+        parsed.durableFilename = name;
+        return parsed;
+      }
+    } catch {
+      // next name
+    }
+  }
+  return null;
 }
 
 async function loadPersisted(id: string): Promise<VideoPipelineState | null> {
@@ -163,36 +256,47 @@ async function loadPersisted(id: string): Promise<VideoPipelineState | null> {
 
   try {
     const raw = await fs.readFile(tmpPath(id), "utf8");
-    const parsed = JSON.parse(raw) as VideoPipelineState;
-    if (parsed?.id === id) {
+    const parsed = parsePipelineState(raw, id);
+    if (parsed) {
       store().set(id, parsed);
       return parsed;
     }
   } catch {
-    // fall through
+    // fall through → Comfy durable
   }
 
-  try {
-    const blob = await fetchComfyViewBlob(comfyStateFilename(id), "", "input");
-    if (blob) {
-      const text = await blob.text();
-      const parsed = JSON.parse(text) as VideoPipelineState;
-      if (parsed?.id === id) {
-        store().set(id, parsed);
-        return parsed;
-      }
+  const fromComfy = await loadFromComfy(id);
+  if (fromComfy) {
+    // Po cold start: lease z martwego instance nie może blokować c1/stitch
+    fromComfy.advancingUntil = undefined;
+    store().set(id, fromComfy);
+    try {
+      await fs.mkdir(tmpDir(), { recursive: true });
+      await fs.writeFile(tmpPath(id), JSON.stringify(fromComfy), "utf8");
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
+    return fromComfy;
   }
 
   return null;
 }
 
+/**
+ * Jawny rehydrate (np. GET gdy memory miss) — zawsze pyta Comfy, nawet gdy /tmp puste.
+ */
+export async function rehydratePipeline(
+  id: string
+): Promise<VideoPipelineState | null> {
+  const existing = store().get(id);
+  if (existing) return existing;
+  return loadPersisted(id);
+}
+
 export async function getPipeline(
   id: string
 ): Promise<VideoPipelineState | null> {
-  return loadPersisted(id);
+  return rehydratePipeline(id);
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -666,9 +770,16 @@ export async function startVideoPipeline(
   await persist(state);
   await enqueueChunk(state, 0);
 
+  const warnings = [...boost.warnings];
+  if (!state.durableSavedAt) {
+    warnings.push(
+      "Nie zapisano stanu pipeline w Comfy input — po redeploy Vercel odzyskanie może się nie udać. Sprawdź COMFYUI_URL / upload."
+    );
+  }
+
   return {
     pipeline: state,
-    warnings: boost.warnings,
+    warnings,
   };
 }
 

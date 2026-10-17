@@ -2,9 +2,9 @@ import { after, NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import {
   advancePipeline,
-  getPipeline,
   kickPipelineBackground,
   pipelineToJobView,
+  rehydratePipeline,
 } from "@/lib/studio/video-pipeline";
 
 export const dynamic = "force-dynamic";
@@ -23,10 +23,17 @@ export async function GET(
     return NextResponse.json({ ok: false, error: "Brak id" }, { status: 400 });
   }
 
-  const existing = await getPipeline(id);
+  // Memory/tmp na Vercel ginie — najpierw rehydrate z Comfy input
+  const existing = await rehydratePipeline(id);
   if (!existing) {
     return NextResponse.json(
-      { ok: false, error: "Pipeline nie znaleziony (wygasł lub zły id)" },
+      {
+        ok: false,
+        recoverable: true,
+        error:
+          "Pipeline chwilowo niedostępny (cold start) — odzyskuję stan z Comfy…",
+        code: "PIPELINE_REHYDRATING",
+      },
       { status: 404 }
     );
   }
@@ -48,14 +55,22 @@ export async function GET(
       chunkInfo: job.chunk,
       clipsDone: pipeline.clips.length,
       chunkCount: pipeline.plan.chunkCount,
+      durableSavedAt: pipeline.durableSavedAt ?? null,
     });
   } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Pipeline tick failed";
+    const missing = /nie znaleziony/i.test(message);
     return NextResponse.json(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Pipeline tick failed",
+        recoverable: missing,
+        error: missing
+          ? "Pipeline chwilowo niedostępny — ponawiam odzyskiwanie…"
+          : message,
+        code: missing ? "PIPELINE_REHYDRATING" : "PIPELINE_TICK_FAILED",
       },
-      { status: 502 }
+      { status: missing ? 404 : 502 }
     );
   }
 }
