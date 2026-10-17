@@ -20,6 +20,7 @@ import type { LtxChunkPlan } from "./ltx-chunks";
 import { preparePromptForModel } from "./prompt-boost";
 import type { GenerateBody } from "./schemas";
 import { pickChunkOutputs, type MediaRef } from "./video-outputs";
+import { runVideoPostProcess } from "./video-postprocess";
 import { stitchComfyClips } from "./video-stitch";
 import {
   buildWorkflow,
@@ -55,6 +56,8 @@ export type VideoPipelineState = {
   modelPrompt?: string;
   modelNegative?: string;
   promptBoostWarnings?: string[];
+  /** Ostrzeżenia z RIFE / upscale (graceful skip). */
+  postProcessWarnings?: string[];
   /** Lease przeciw podwójnemu enqueue przy concurrent poll (ms epoch). */
   advancingUntil?: number;
 };
@@ -299,11 +302,11 @@ async function advancePipelineUnlocked(
     }
   }
 
-  // Stitch niedokończony (crash / timeout) — ponów gdy lease wygasł
+  // Stitch/post niedokończony (crash / timeout) — ponów gdy lease wygasł
   if (
     state.status === "stitching" &&
     !state.currentPromptId &&
-    state.clips.length >= 2 &&
+    state.clips.length >= 1 &&
     (!state.advancingUntil || state.advancingUntil <= Date.now())
   ) {
     return finishStitch(state);
@@ -482,35 +485,82 @@ async function finishStitch(
 ): Promise<VideoPipelineState> {
   state.status = "stitching";
   state.currentPromptId = null;
-  state.advancingUntil = Date.now() + 120_000;
+  state.advancingUntil = Date.now() + 180_000;
   state.progress = emptyProgress({
-    percent: 95,
+    percent: 92,
     phase: "ffmpeg stitch",
   });
   await persist(state);
 
   try {
-    const stitchPrefix =
-      state.engine === "wan"
-        ? "studio/video-wan-stitched"
-        : "studio/video-ltx-stitched";
-    const result = await stitchComfyClips({
-      clips: state.clips,
-      fps: state.plan.fps,
-      overlapFrames: state.plan.overlap,
-      filenamePrefix: stitchPrefix,
-    });
-    state.outputs = [
-      {
+    let finalClip: MediaRef;
+
+    if (state.clips.length === 1) {
+      // Pipeline 1-chunk + post (Smooth 24) — bez ffmpeg stitch
+      finalClip = state.clips[0]!;
+    } else {
+      const stitchPrefix =
+        state.engine === "wan"
+          ? "studio/video-wan-stitched"
+          : "studio/video-ltx-stitched";
+      const result = await stitchComfyClips({
+        clips: state.clips,
+        fps: state.plan.fps,
+        overlapFrames: state.plan.overlap,
+        filenamePrefix: stitchPrefix,
+      });
+      finalClip = {
         filename: result.filename,
         subfolder: result.subfolder || "studio",
         type: result.type || "output",
-      },
-    ];
+      };
+    }
+
+    const wantRife = Boolean(state.body.postRife);
+    const wantUpscale = Boolean(state.body.postUpscale);
+
+    if (wantRife || wantUpscale) {
+      state.progress = emptyProgress({
+        percent: 96,
+        phase: wantRife ? "RIFE 16→24…" : "upscale…",
+      });
+      state.advancingUntil = Date.now() + 600_000;
+      await persist(state);
+
+      const post = await runVideoPostProcess({
+        clip: finalClip,
+        sourceFps: state.plan.fps,
+        postRife: wantRife,
+        targetFps: 24,
+        postUpscale: wantUpscale,
+        filenamePrefix:
+          state.engine === "wan"
+            ? "studio/video-wan-post"
+            : "studio/video-ltx-post",
+      });
+      finalClip = post.clip;
+      state.postProcessWarnings = post.warnings;
+      if (post.warnings.length) {
+        state.promptBoostWarnings = [
+          ...(state.promptBoostWarnings ?? []),
+          ...post.warnings,
+        ];
+      }
+    }
+
+    state.outputs = [finalClip];
     state.status = "completed";
+    const postNote =
+      wantRife || wantUpscale
+        ? state.postProcessWarnings?.length
+          ? "gotowe (post częściowy)"
+          : "gotowe (post)"
+        : state.clips.length === 1
+          ? "gotowe"
+          : "gotowe (stitched)";
     state.progress = emptyProgress({
       percent: 100,
-      phase: "gotowe (stitched)",
+      phase: postNote,
     });
     state.advancingUntil = undefined;
     await persist(state);
@@ -576,7 +626,12 @@ export async function startVideoPipeline(
 
   const videoPlan = planVideo(body);
   const plan = videoPlan.chunkPlan;
-  if (!plan || !plan.chunked) {
+  const needsPost = Boolean(body.postRife || body.postUpscale);
+  if (!plan) {
+    throw new Error("Brak planu chunków dla pipeline");
+  }
+  // 1 chunk OK gdy Smooth 24 / upscale — wtedy finishStitch robi tylko post
+  if (!plan.chunked && !needsPost) {
     throw new Error(
       "Video mieści się w 1 chunku — użyj zwykłego /api/generate"
     );

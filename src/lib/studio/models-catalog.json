@@ -106,7 +106,18 @@
     "targetSubdir": "diffusion_models",
     "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors",
     "sizeHint": "~16.4 GB",
-    "notes": "Domyślny silnik wideo (fotoreal). UNETLoader + Dynamic VRAM/offload na 16 GB. Wymaga umt5_xxl_fp8 + wan_2.1_vae + clip_vision_h. Chunki ≤81 klatek (4n+1).",
+    "notes": "Domyślny silnik wideo (fotoreal). UNETLoader + Dynamic VRAM/offload na 16 GB. Wymaga umt5_xxl_fp8 + wan_2.1_vae + clip_vision_h. Chunki ≤81 klatek (4n+1). FPS 16|24.",
+    "vramHintGb": 16
+  },
+  {
+    "id": "wan21-i2v-720p-fp8",
+    "name": "Wan 2.1 I2V 720p 14B (fp8 scaled)",
+    "type": "unet",
+    "filename": "wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+    "targetSubdir": "diffusion_models",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
+    "sizeHint": "~16.4 GB",
+    "notes": "Preset Quality 720p. Filename jak na Legionie. SAFE maxLength 81 @ 1280×720 — smoke na GPU. Te same deps co 480p (umt5 + vae + clip_vision).",
     "vramHintGb": 16
   },
   {
