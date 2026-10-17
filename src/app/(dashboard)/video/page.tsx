@@ -52,10 +52,10 @@ export default async function StudioVideoPage() {
         <p className="max-w-2xl text-stone-400">
           Domyślnie{" "}
           <strong className="font-medium text-stone-300">Wan 2.1 I2V</strong>{" "}
-          — domyślnie{" "}
+          —{" "}
           <strong className="font-medium text-stone-300">Fast 480p</strong>{" "}
-          (832×480 · 16 fps). Quality 720p opcjonalnie (wolne). Smooth 24 =
-          toggle RIFE, nie mandatory. FPS 16|24 · SAFE 81 · opcjonalny upscale.
+          z distill LoRA lightx2v (steps 4 · CFG≈1). Quality bez LoRA.
+          24 fps: Smooth 24 (RIFE) preferowane; Native 24 experimental. SAFE 81.
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}

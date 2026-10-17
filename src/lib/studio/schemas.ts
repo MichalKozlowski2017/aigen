@@ -34,6 +34,11 @@ export const generateBodySchema = z.object({
   qualityPreset: z
     .enum(["fast-480p", "smooth-24", "quality-720p", "quality-24-native"])
     .optional(),
+  /**
+   * Fast: lightx2v distill LoRA (LoraLoaderModelOnly) gdy plik na Comfy.
+   * false = Quality / wymuś bez LoRA. true = wymuś próbę. undefined = z presetu.
+   */
+  wanDistillLora: z.boolean().optional(),
   /** Po stitch: Comfy RIFE 16→24 (graceful jeśli node brak) */
   postRife: z.boolean().optional().default(false),
   /** Po stitch: RealESRGAN / upscale 2× (graceful) */

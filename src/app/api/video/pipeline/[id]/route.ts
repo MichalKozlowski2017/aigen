@@ -1,16 +1,26 @@
 import { after, NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
+import { isPipelineLegionWorker } from "@/lib/studio/config";
 import {
   advancePipeline,
+  getPipeline,
   kickPipelineBackground,
   pipelineToJobView,
   rehydratePipeline,
+  shouldKickPipelineBackground,
 } from "@/lib/studio/video-pipeline";
 
 export const dynamic = "force-dynamic";
 /** Tick może enqueue kolejny chunk lub odpalić stitch. */
 export const maxDuration = 300;
 
+/**
+ * GET status pipeline.
+ *
+ * - Domyślnie (Vercel best-effort): advance + rzadki after() kick.
+ * - `PIPELINE_LEGION_WORKER=1`: tylko odczyt stanu — Legion worker jest SoT.
+ * Browser poll NIE jest source of truth dla kolejnych chunków.
+ */
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> }
@@ -38,11 +48,21 @@ export async function GET(
     );
   }
 
+  const legionWorker = isPipelineLegionWorker();
+
   try {
-    const pipeline = await advancePipeline(id);
+    // Legion SoT: panel tylko czyta; inaczej best-effort advance przy pollu
+    const pipeline = legionWorker
+      ? ((await getPipeline(id)) ?? existing)
+      : await advancePipeline(id);
     const job = pipelineToJobView(pipeline);
 
-    if (pipeline.status !== "completed" && pipeline.status !== "failed") {
+    if (
+      !legionWorker &&
+      pipeline.status !== "completed" &&
+      pipeline.status !== "failed" &&
+      shouldKickPipelineBackground(pipeline.id)
+    ) {
       after(() => {
         kickPipelineBackground(pipeline.id, 180_000);
       });
@@ -56,6 +76,7 @@ export async function GET(
       clipsDone: pipeline.clips.length,
       chunkCount: pipeline.plan.chunkCount,
       durableSavedAt: pipeline.durableSavedAt ?? null,
+      advanceMode: legionWorker ? "legion-worker" : "vercel-best-effort",
     });
   } catch (err) {
     const message =

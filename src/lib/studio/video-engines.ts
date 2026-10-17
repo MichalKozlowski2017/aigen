@@ -70,7 +70,7 @@ export const WAN_UI_LIMITS = {
   qualityWidth: 1280,
   qualityHeight: 720,
   maxDurationSec: 60,
-  note: "Wan: fotoreal / wolniej / offload (FP8). FPS 16|24. 1 chunk ≤81 klatek (4n+1). @24fps/10s ≈3 chunki. Smooth 24 = gen 16 + RIFE. 720p = Quality preset.",
+  note: "Wan: fotoreal / offload (FP8). Fast = lightx2v distill LoRA. FPS 16|24. 1 chunk ≤81 klatek (4n+1). Smooth 24 (RIFE) preferowane vs Native 24. 720p = Quality bez LoRA.",
 } as const;
 
 /** Wybierz UNET 480p vs 720p po nazwie / rozdzielczości. */

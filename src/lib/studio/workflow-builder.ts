@@ -80,6 +80,25 @@ export {
   type WanQualityPreset,
   type WanQualityPresetId,
 } from "./video-presets";
+export {
+  WAN_DISTILL_LORA_FILENAME,
+  resolveWanDistillLora,
+  wantsWanDistill,
+} from "./wan-distill";
+import {
+  WAN_DISTILL_CFG,
+  WAN_DISTILL_SAMPLER,
+  WAN_DISTILL_SCHEDULER,
+  WAN_DISTILL_STEPS,
+  WAN_DISTILL_STRENGTH,
+  WAN_FAST_NO_LORA_CFG,
+  WAN_FAST_NO_LORA_SAMPLER,
+  WAN_FAST_NO_LORA_SCHEDULER,
+  WAN_FAST_NO_LORA_STEPS,
+  resolveWanDistillLora,
+  wantsWanDistill,
+} from "./wan-distill";
+import { getWanQualityPreset } from "./video-presets";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -103,19 +122,27 @@ function imageBasename(raw: string | undefined): string {
   return v.includes("/") ? v.slice(v.lastIndexOf("/") + 1) : v;
 }
 
-/** Buduje workflow ComfyUI API z pól formularza. */
-export function buildWorkflow(body: GenerateBody): {
+export type BuildWorkflowResult = {
   workflow: WorkflowGraph;
   template: string;
   engine: "flux" | "sdxl" | "svd" | "ltx" | "wan";
-} {
+  /** Ostrzeżenia (np. brak LoRA distill) — UI / pipeline może dołączyć. */
+  warnings?: string[];
+};
+
+/** Buduje workflow ComfyUI API z pól formularza (async — sprawdza LoRA na Comfy). */
+export async function buildWorkflow(
+  body: GenerateBody
+): Promise<BuildWorkflowResult> {
   if (body.kind === "video") {
     const engine = resolveVideoEngine(body);
     if (engine === "wan") {
+      const { workflow, warnings } = await buildWanVideoWorkflow(body);
       return {
-        workflow: buildWanVideoWorkflow(body),
+        workflow,
         template: "txt2video-wan",
         engine: "wan",
+        warnings,
       };
     }
     if (engine === "ltx") {
@@ -465,12 +492,16 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
 }
 
 /**
- * Wan 2.1 I2V — UNETLoader (FP8) + CLIPLoader(type=wan) + CLIPVision +
- * WanImageToVideo + ModelSamplingSD3 + KSampler + VHS.
- * Opcjonalnie CodeFormer; opcjonalnie last-frame (chunk continue).
+ * Wan 2.1 I2V — UNETLoader (FP8) + opcjonalnie LoraLoaderModelOnly (lightx2v)
+ * + CLIPLoader(type=wan) + CLIPVision + WanImageToVideo + ModelSamplingSD3
+ * + KSampler + VHS. Opcjonalnie CodeFormer; opcjonalnie last-frame (chunk continue).
  */
-function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
+async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
+  workflow: WorkflowGraph;
+  warnings: string[];
+}> {
   const graph = asGraph(txt2videoWanTemplate);
+  const warnings: string[] = [];
   const seed =
     body.seed === undefined || body.seed < 0
       ? Math.floor(Math.random() * 2_147_483_647)
@@ -492,6 +523,12 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
   const chunkIdx = body.ltxChunkIndex ?? 0;
   const prefix = `studio/video-wan-c${chunkIdx}`;
+  const preset = getWanQualityPreset(body.qualityPreset);
+  const wantDistill =
+    body.wanDistillLora !== false &&
+    (body.wanDistillLora === true ||
+      preset?.useDistillLora === true ||
+      wantsWanDistill(body.qualityPreset));
 
   graph["37"].inputs.unet_name = unet;
   graph["37"].inputs.weight_dtype = "default";
@@ -509,9 +546,49 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
   graph["50"].inputs.height = plan.height;
   graph["50"].inputs.length = chunkLength;
   graph["3"].inputs.seed = seed;
-  // Fast 480p default ~10; Quality presety podają 16–20 z body
-  graph["3"].inputs.steps = body.steps ?? 10;
-  graph["3"].inputs.cfg = body.cfg ?? 6;
+
+  let steps =
+    body.steps ??
+    preset?.steps ??
+    (wantDistill ? WAN_DISTILL_STEPS : WAN_FAST_NO_LORA_STEPS);
+  let cfg =
+    body.cfg ??
+    preset?.cfg ??
+    (wantDistill ? WAN_DISTILL_CFG : WAN_FAST_NO_LORA_CFG);
+  let samplerName =
+    preset?.samplerName ??
+    (wantDistill ? WAN_DISTILL_SAMPLER : WAN_FAST_NO_LORA_SAMPLER);
+  let scheduler =
+    preset?.scheduler ??
+    (wantDistill ? WAN_DISTILL_SCHEDULER : WAN_FAST_NO_LORA_SCHEDULER);
+
+  if (wantDistill) {
+    const distill = await resolveWanDistillLora();
+    if (distill.attach && distill.loraName) {
+      spliceWanDistillLora(graph, distill.loraName);
+      steps = body.steps ?? WAN_DISTILL_STEPS;
+      cfg = body.cfg ?? WAN_DISTILL_CFG;
+      samplerName = WAN_DISTILL_SAMPLER;
+      scheduler = WAN_DISTILL_SCHEDULER;
+    } else {
+      if (distill.warning) warnings.push(distill.warning);
+      // Graceful: bez LoRA — klasyczny Fast (ignoruj distill steps/CFG z UI)
+      steps = WAN_FAST_NO_LORA_STEPS;
+      cfg = WAN_FAST_NO_LORA_CFG;
+      samplerName = WAN_FAST_NO_LORA_SAMPLER;
+      scheduler = WAN_FAST_NO_LORA_SCHEDULER;
+    }
+  } else {
+    steps = body.steps ?? preset?.steps ?? 18;
+    cfg = body.cfg ?? preset?.cfg ?? 6;
+    samplerName = preset?.samplerName ?? "uni_pc";
+    scheduler = preset?.scheduler ?? "simple";
+  }
+
+  graph["3"].inputs.steps = steps;
+  graph["3"].inputs.cfg = cfg;
+  graph["3"].inputs.sampler_name = samplerName;
+  graph["3"].inputs.scheduler = scheduler;
   graph["21"].inputs.frame_rate = plan.fps;
   graph["21"].inputs.filename_prefix = prefix;
 
@@ -539,7 +616,25 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
     };
   }
 
-  return graph;
+  return { workflow: graph, warnings };
+}
+
+/** UNET (37) → LoraLoaderModelOnly (55) → ModelSamplingSD3 (54). */
+function spliceWanDistillLora(
+  graph: WorkflowGraph,
+  loraName: string
+): void {
+  graph["55"] = {
+    class_type: "LoraLoaderModelOnly",
+    inputs: {
+      model: ["37", 0],
+      lora_name: loraName,
+      strength_model: WAN_DISTILL_STRENGTH,
+    },
+  };
+  if (graph["54"]) {
+    graph["54"].inputs.model = ["55", 0];
+  }
 }
 
 /**

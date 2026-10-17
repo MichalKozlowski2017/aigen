@@ -107,6 +107,7 @@ export function GenerateForm({
     DEFAULT_WAN_QUALITY_PRESET
   );
   const [steps, setSteps] = useState<number>(DEFAULT_WAN_FAST_STEPS);
+  const [cfg, setCfg] = useState<number>(1);
   /** Smooth 24: opcjonalny RIFE po stitch — nie jest domyślny ani mandatory. */
   const [postRife, setPostRife] = useState(false);
   const [postUpscale, setPostUpscale] = useState(false);
@@ -248,6 +249,7 @@ export function GenerateForm({
     setHeight(preset.height);
     setFps(preset.fps);
     setSteps(preset.steps);
+    setCfg(preset.cfg);
     setFaceRestore(preset.faceRestore);
     setFaceRestoreFidelity(preset.faceRestoreFidelity);
     // Quality* wyłącza RIFE; Fast zachowuje opcjonalny toggle
@@ -749,7 +751,14 @@ export function GenerateForm({
           seed,
           batch: kind === "image" ? batch : 1,
           ...(kind === "video" && videoEngine === "wan"
-            ? { steps, qualityPreset }
+            ? {
+                steps,
+                cfg,
+                qualityPreset,
+                wanDistillLora:
+                  qualityPreset === "fast-480p" ||
+                  qualityPreset === "smooth-24",
+              }
             : {}),
         };
 
@@ -850,7 +859,11 @@ export function GenerateForm({
           body.postUpscale = postUpscale;
           if (videoEngine === "wan") {
             body.steps = steps;
+            body.cfg = cfg;
             body.qualityPreset = qualityPreset;
+            body.wanDistillLora =
+              qualityPreset === "fast-480p" ||
+              qualityPreset === "smooth-24";
           }
           if (
             isChunkedVideoEngine(videoEngine) &&
@@ -974,13 +987,13 @@ export function GenerateForm({
               {videoEngine === "wan" ? (
                 <p className="rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-2 text-[12px] leading-relaxed text-teal-100/85">
                   <span className="font-medium text-teal-50">
-                    fotoreal / wolniej / offload
+                    fotoreal / offload
                   </span>
                   {" — "}
-                  Domyślnie <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
-                  (832×480 · 16 fps · steps ~{DEFAULT_WAN_FAST_STEPS}). Quality
-                  720p zostaje opcjonalnie — wolne na 16 GB. Smooth 24 = toggle
-                  RIFE poniżej (nie mandatory).
+                  <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
+                  = distill LoRA lightx2v (steps {DEFAULT_WAN_FAST_STEPS} · CFG≈1 ·
+                  euler). Quality = bez LoRA / więcej steps. 24 fps: preferuj
+                  Smooth 24 (RIFE); Native 24 = experimental.
                 </p>
               ) : null}
             </fieldset>
@@ -999,11 +1012,29 @@ export function GenerateForm({
                       className={[
                         "rounded-lg border px-3 py-2 text-left text-sm transition",
                         qualityPreset === p.id
-                          ? "border-amber-400/45 bg-amber-400/10 text-amber-50"
+                          ? p.experimental
+                            ? "border-orange-400/45 bg-orange-400/10 text-orange-50"
+                            : "border-amber-400/45 bg-amber-400/10 text-amber-50"
                           : "border-white/10 bg-white/[0.03] text-stone-300 hover:border-white/20",
                       ].join(" ")}
                     >
-                      <span className="block font-medium">{p.label}</span>
+                      <span className="block font-medium">
+                        {p.label}
+                        {p.experimental ? (
+                          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-orange-300/90">
+                            experimental
+                          </span>
+                        ) : null}
+                        {p.useDistillLora ? (
+                          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-teal-300/80">
+                            distill LoRA
+                          </span>
+                        ) : (
+                          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-stone-500">
+                            bez LoRA
+                          </span>
+                        )}
+                      </span>
                       <span className="mt-0.5 block text-[11px] text-stone-500">
                         {p.blurb}
                       </span>
@@ -1406,7 +1437,9 @@ export function GenerateForm({
                     {WAN_FPS_OPTIONS.map((f) => (
                       <option key={f} value={f}>
                         {f} fps
-                        {f === 24 ? " · native (~3 chunki @10s)" : " · Fast / Smooth"}
+                        {f === 24
+                          ? " · native experimental (~3 chunki @10s; preferuj Smooth 24)"
+                          : " · Fast / Smooth"}
                       </option>
                     ))}
                   </select>

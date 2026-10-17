@@ -45,16 +45,19 @@ COMFYUI_OUTPUT_DIR=C:\ścieżka\do\ComfyUI\output
 
 ### Vercel (panel) + Legion (Comfy)
 
-Na Vercel ustaw tylko:
+Na Vercel ustaw:
 
 ```env
 COMFYUI_URL=https://twoj-tunnel.example
 STUDIO_PASSWORD=...
+# Gdy Legion queue worker orkiestruje chunki (zalecane na dłuższe klipy):
+# PIPELINE_LEGION_WORKER=1
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
 - **Galeria:** outputy z historii Comfy (`/history`) + `/api/comfy-view`.
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
+- **Pipeline:** patrz §6 — Legion worker SoT; Vercel GET = status + best-effort.
 
 ## 3. Uruchomienie razem
 
@@ -89,9 +92,31 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 | Tryb   | Rekomendacja                                      |
 |--------|----------------------------------------------------|
 | Obraz  | Flux.2 Dev fp8 (domyślnie); SDXL 1024² opcjonalnie |
-| Wideo  | Wan I2V Fast 480p (+ Smooth 24 / RIFE); SVD legacy |
+| Wideo  | Wan Fast 480p + lightx2v distill LoRA; Smooth 24 (RIFE); SVD legacy |
 
-## 6. Troubleshooting
+### Wan Fast (distill LoRA)
+
+- Plik: `models/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`
+- Preset **Fast**: steps 4–6, CFG≈1, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje
+- Brak LoRA na Comfy → graceful fallback (steps ~10, CFG 6, bez LoRA) + ostrzeżenie w UI
+- **Quality** = bez LoRA / więcej steps; **Native 24** = experimental (preferuj Smooth 24 / RIFE)
+
+## 6. Pipeline chunków (Wan/LTX)
+
+**Legion worker jest source of truth** dla kolejnych chunków (c1…stitch). Browser poll i Vercel GET służą do **statusu**; advance na GET to tylko best-effort gdy nie ma workera.
+
+| Tryb | ENV | Zachowanie |
+|------|-----|------------|
+| Best-effort (domyślnie) | brak / `PIPELINE_LEGION_WORKER` wyłączone | `POST` start + jedna pętla `after()`; `GET` advance + kick max co ~45s (bez multiplikacji na każde poll) |
+| Legion worker | `PIPELINE_LEGION_WORKER=1` | Panel: `GET` tylko czyta stan (bez advance). Worker: `POST /api/video/pipeline/[id]/register` kickuje orkiestrację |
+
+Endpointy:
+
+- `POST /api/video/pipeline` — start + enqueue c0
+- `GET /api/video/pipeline/[id]` — status (+ best-effort advance jeśli nie Legion)
+- `POST /api/video/pipeline/[id]/register` — claim / kick dla Legion workera
+
+## 7. Troubleshooting
 
 | Objaw | Co sprawdzić |
 |-------|----------------|
@@ -99,3 +124,4 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 | Galeria pusta | zdalnie: tunel + historia Comfy; lokalnie: `COMFYUI_OUTPUT_DIR` |
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
+| Fast bez przyspieszenia | brak LoRA lightx2v w `loras/` — fallback klasyczny Fast |
