@@ -77,6 +77,8 @@ export type DownloadJob = {
 
 export type StudioPublicConfig = {
   comfyUrl: string;
+  /** true gdy COMFYUI_URL nie wskazuje na localhost (Vercel + tunel). */
+  comfyRemote: boolean;
   modelsDirConfigured: boolean;
   outputDirConfigured: boolean;
   modelsDir: string | null;

@@ -86,16 +86,16 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 
 ## 5. Limity VRAM (~16 GB)
 
-| Tryb   | Rekomendacja                          |
-|--------|----------------------------------------|
-| Obraz  | SDXL 1024², batch 1–2                 |
-| Wideo  | ≤ 4 s, ≤ 512–576 px, ≤ 12 FPS (SVD)   |
+| Tryb   | Rekomendacja                                      |
+|--------|----------------------------------------------------|
+| Obraz  | Flux.2 Dev fp8 (domyślnie); SDXL 1024² opcjonalnie |
+| Wideo  | Wan I2V Fast 480p (+ Smooth 24 / RIFE); SVD legacy |
 
 ## 6. Troubleshooting
 
 | Objaw | Co sprawdzić |
 |-------|----------------|
-| Offline na pulpicie | ComfyUI uruchomione? `COMFYUI_URL`? firewall? |
-| Galeria pusta | `COMFYUI_OUTPUT_DIR` wskazuje na folder `output` |
-| Pobieranie zablokowane | brak `COMFYUI_MODELS_DIR` |
-| Wideo pada na node | brak VHS / SVD / obrazu w `input` |
+| Offline na pulpicie | ComfyUI uruchomione? `COMFYUI_URL`? firewall / tunel? |
+| Galeria pusta | zdalnie: tunel + historia Comfy; lokalnie: `COMFYUI_OUTPUT_DIR` |
+| Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
+| Wideo pada na node | brak Wan / VHS / obrazu w `input` |
