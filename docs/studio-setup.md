@@ -55,7 +55,7 @@ STUDIO_PASSWORD=...
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
-- **Galeria:** outputy z historii Comfy (`/history`) + `/api/comfy-view`.
+- **Galeria:** `/history` + trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe historii) + stock `/internal/files/output` (tylko root) + `/api/comfy-view`. Po restarcie Comfy z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
 - **Pipeline:** patrz §6 — Legion worker SoT; Vercel GET = status + best-effort.
 
@@ -121,7 +121,7 @@ Endpointy:
 | Objaw | Co sprawdzić |
 |-------|----------------|
 | Offline na pulpicie | ComfyUI uruchomione? `COMFYUI_URL`? firewall / tunel? |
-| Galeria pusta | zdalnie: tunel + historia Comfy; lokalnie: `COMFYUI_OUTPUT_DIR` |
+| Galeria pusta | zdalnie: tunel + `/history` lub `python scripts/seed-comfy-gallery-index.py` (indeks w input/); lokalnie: `COMFYUI_OUTPUT_DIR` |
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
 | Fast bez przyspieszenia | brak LoRA lightx2v w `loras/` — fallback klasyczny Fast |

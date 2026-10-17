@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { getHistory } from "./comfy-client";
+import { getHistory, listComfyInternalFiles } from "./comfy-client";
+import { loadGalleryIndex } from "./gallery-index";
 import { normalizeComfyMediaRef } from "./comfy-media";
 import { outputRoot, resolveOutputFile } from "./paths";
 import type { GalleryItem } from "./types";
@@ -104,63 +105,140 @@ function extractOutputsFromHistoryEntry(
   return list;
 }
 
+type ComfyGalleryRef = {
+  filename: string;
+  subfolder: string;
+  type: string;
+  mtimeMs?: number;
+};
+
+function pushGalleryRef(
+  refs: ComfyGalleryRef[],
+  seen: Set<string>,
+  filename: string,
+  subfolder: string,
+  type: string,
+  mtimeMs?: number
+): void {
+  const o = normalizeComfyMediaRef(filename, subfolder, type);
+  const key = `${o.type}/${o.subfolder}/${o.filename}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  refs.push({ ...o, mtimeMs });
+}
+
 /**
- * Galeria z historii ComfyUI (przez COMFYUI_URL / tunel) — działa na Vercel.
+ * Galeria zdalna (COMFYUI_URL / tunel):
+ * 1) `/history` (świeże joby),
+ * 2) `input/aigen-gallery-index.json` (trwałe po wipe historii),
+ * 3) `/internal/files/output` (stock — tylko root output, bez studio/).
  */
 export async function listGalleryFromComfy(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
 }): Promise<{ items: GalleryItem[]; error: string | null }> {
+  const kindFilter = options.kind ?? "all";
+  const limit = options.limit ?? 60;
+  const seen = new Set<string>();
+  const refs: ComfyGalleryRef[] = [];
+  const errors: string[] = [];
+
   try {
     const history = (await getHistory()) as Record<string, unknown>;
-    const kindFilter = options.kind ?? "all";
-    const limit = options.limit ?? 60;
-    const seen = new Set<string>();
-    const items: GalleryItem[] = [];
-    let order = 0;
-
     for (const [promptId, entry] of Object.entries(history)) {
       const outs = extractOutputsFromHistoryEntry(entry);
       for (const o of outs) {
-        const key = `${o.type}/${o.subfolder}/${o.filename}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const ext = path.extname(o.filename).toLowerCase();
-        const kind = kindFor(ext);
-        if (kind === "other") continue;
-        if (kindFilter !== "all" && kind !== kindFilter) continue;
-        order += 1;
-        items.push({
-          id: `comfy:${key}`,
-          name: o.filename,
-          relativePath: key,
-          mime: mimeFor(ext),
-          kind,
-          sizeBytes: 0,
-          mtimeMs: Date.now() - order,
-          url: comfyViewProxyUrl(o.filename, o.subfolder, o.type),
-          source: "comfy",
-          comfy: {
-            filename: o.filename,
-            subfolder: o.subfolder,
-            type: o.type,
-          },
-        });
+        pushGalleryRef(refs, seen, o.filename, o.subfolder, o.type);
       }
       void promptId;
     }
-
-    items.sort((a, b) => b.mtimeMs - a.mtimeMs);
-    return { items: items.slice(0, limit), error: null };
   } catch (err) {
+    errors.push(
+      err instanceof Error
+        ? `historia: ${err.message}`
+        : "historia: odczyt nieudany"
+    );
+  }
+
+  try {
+    const indexed = await loadGalleryIndex();
+    for (const o of indexed) {
+      pushGalleryRef(
+        refs,
+        seen,
+        o.filename,
+        o.subfolder,
+        o.type,
+        o.mtimeMs
+      );
+    }
+  } catch (err) {
+    errors.push(
+      err instanceof Error
+        ? `indeks: ${err.message}`
+        : "indeks: odczyt nieudany"
+    );
+  }
+
+  try {
+    const internal = await listComfyInternalFiles("output");
+    let order = 0;
+    for (const f of internal) {
+      order += 1;
+      pushGalleryRef(
+        refs,
+        seen,
+        f.filename,
+        "",
+        f.type || "output",
+        Date.now() - order
+      );
+    }
+  } catch (err) {
+    errors.push(
+      err instanceof Error
+        ? `internal/files: ${err.message}`
+        : "internal/files: odczyt nieudany"
+    );
+  }
+
+  const items: GalleryItem[] = [];
+  let order = 0;
+  for (const o of refs) {
+    const ext = path.extname(o.filename).toLowerCase();
+    const kind = kindFor(ext);
+    if (kind === "other") continue;
+    if (kindFilter !== "all" && kind !== kindFilter) continue;
+    order += 1;
+    const key = `${o.type}/${o.subfolder}/${o.filename}`;
+    items.push({
+      id: `comfy:${key}`,
+      name: o.filename,
+      relativePath: key,
+      mime: mimeFor(ext),
+      kind,
+      sizeBytes: 0,
+      mtimeMs: o.mtimeMs ?? Date.now() - order,
+      url: comfyViewProxyUrl(o.filename, o.subfolder, o.type),
+      source: "comfy",
+      comfy: {
+        filename: o.filename,
+        subfolder: o.subfolder,
+        type: o.type,
+      },
+    });
+  }
+
+  items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  if (items.length === 0 && errors.length > 0) {
     return {
       items: [],
-      error:
-        err instanceof Error
-          ? `Galeria Comfy: ${err.message}`
-          : "Nie udało się odczytać historii ComfyUI",
+      error: `Galeria Comfy: ${errors.join("; ")}`,
     };
   }
+
+  return { items: items.slice(0, limit), error: null };
 }
 
 async function listGalleryFromDisk(options: {
@@ -227,7 +305,8 @@ async function listGalleryFromDisk(options: {
 }
 
 /**
- * Preferuje lokalny COMFYUI_OUTPUT_DIR; na Vercel/bez ścieżki — historia Comfy przez tunel.
+ * Preferuje lokalny COMFYUI_OUTPUT_DIR; na Vercel/bez ścieżki —
+ * historia Comfy + indeks `aigen-gallery-index.json` + `/internal/files/output`.
  */
 export async function listGallery(options: {
   kind?: "all" | "image" | "video";

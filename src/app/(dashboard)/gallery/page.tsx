@@ -20,10 +20,10 @@ export default async function StudioGalleryPage() {
         </h1>
         <p className="max-w-2xl text-stone-400">
           {result.source === "comfy"
-            ? "Outputy z historii ComfyUI (przez COMFYUI_URL / tunel) — widać też wyniki z Generuj."
+            ? "Outputy przez COMFYUI_URL / tunel: historia Comfy, indeks aigen-gallery-index.json oraz /internal/files/output."
             : result.source === "local"
               ? "Pliki z COMFYUI_OUTPUT_DIR — obrazy i MP4."
-              : "Lokalny katalog output albo historia Comfy przez tunel."}
+              : "Lokalny katalog output albo Comfy przez tunel (historia / indeks)."}
         </p>
       </header>
       <GalleryClient
