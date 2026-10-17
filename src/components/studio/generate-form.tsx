@@ -26,13 +26,16 @@ import {
   DEFAULT_LTX_CHECKPOINT,
   DEFAULT_WAN_UNET,
 } from "@/lib/studio/video-engines";
-import { pickChunkOutputs } from "@/lib/studio/video-outputs";
-
 type JobOutput = {
   filename: string;
   subfolder: string;
   type: string;
 };
+
+/** Wan chunk ~15–20+ min; 2 chunki + stitch → długi deadline. */
+const JOB_POLL_INTERVAL_MS = 2_000;
+const JOB_POLL_MAX_MS = 90 * 60 * 1_000;
+const PIPELINE_STORAGE_KEY = "aigen.videoPipeline";
 
 type ErrorDetail = {
   message: string;
@@ -109,7 +112,41 @@ export function GenerateForm({
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<ErrorDetail | null>(null);
   const [promptId, setPromptId] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  /** Serwerowa orkiestracja Wan/LTX chunków — poll /api/video/pipeline/[id]. */
+  const [pipelineId, setPipelineId] = useState<string | null>(() => {
+    if (kind !== "video" || typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(PIPELINE_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as {
+        pipelineId?: string;
+        savedAt?: number;
+      };
+      if (!parsed.pipelineId) return null;
+      if (parsed.savedAt && Date.now() - parsed.savedAt > JOB_POLL_MAX_MS) {
+        window.localStorage.removeItem(PIPELINE_STORAGE_KEY);
+        return null;
+      }
+      return parsed.pipelineId;
+    } catch {
+      return null;
+    }
+  });
+  const [status, setStatus] = useState<string | null>(() =>
+    // Wznów UI po odświeżeniu, gdy localStorage ma aktywny pipeline
+    kind === "video" && typeof window !== "undefined"
+      ? (() => {
+          try {
+            const raw = window.localStorage.getItem(PIPELINE_STORAGE_KEY);
+            if (!raw) return null;
+            const parsed = JSON.parse(raw) as { pipelineId?: string };
+            return parsed.pipelineId ? "running" : null;
+          } catch {
+            return null;
+          }
+        })()
+      : null
+  );
   const [outputs, setOutputs] = useState<JobOutput[]>([]);
   const [jobProgress, setJobProgress] = useState<JobProgress | null>(null);
   const [nodesTotalHint, setNodesTotalHint] = useState<number | null>(null);
@@ -125,6 +162,7 @@ export function GenerateForm({
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [pollWarning, setPollWarning] = useState<string | null>(null);
 
   const videoPlan =
     kind === "video"
@@ -268,17 +306,35 @@ export function GenerateForm({
   }, [prompt, negativePrompt, kind]);
 
   useEffect(() => {
-    if (!promptId) return;
+    // Pipeline ma własny poller — nie dubluj /api/jobs.
+    if (!promptId || pipelineId) return;
     let cancelled = false;
+    let consecutiveErrors = 0;
+    const started = Date.now();
+
     const tick = async () => {
+      if (cancelled) return;
+      if (Date.now() - started > JOB_POLL_MAX_MS) {
+        setError(
+          "Timeout odpytywania joba (Wan/LTX może trwać 15–20+ min/chunk). Odśwież i sprawdź galerię / Comfy."
+        );
+        return;
+      }
       try {
         const res = await fetch(`/api/jobs/${encodeURIComponent(promptId)}`);
         const data = await res.json();
         if (cancelled) return;
         if (!data.ok) {
-          setError(data.error ?? "Błąd statusu");
+          consecutiveErrors += 1;
+          setPollWarning(
+            data.error ??
+              `Błąd statusu (próba ${consecutiveErrors}) — ponawiam…`
+          );
+          window.setTimeout(tick, Math.min(15_000, JOB_POLL_INTERVAL_MS * consecutiveErrors));
           return;
         }
+        consecutiveErrors = 0;
+        setPollWarning(null);
         const job = data.job as {
           status: string;
           outputs?: JobOutput[];
@@ -288,7 +344,7 @@ export function GenerateForm({
         setOutputs(job.outputs ?? []);
         if (job.progress) {
           setJobProgress(job.progress);
-          if (job.progress.errorMessage) {
+          if (job.progress.errorMessage && job.status === "failed") {
             setErrorDetail({
               message: job.progress.errorMessage,
               hint: job.progress.errorHint ?? undefined,
@@ -301,22 +357,140 @@ export function GenerateForm({
         if (job.status === "completed" || job.status === "failed") {
           return;
         }
-        window.setTimeout(tick, 1200);
+        window.setTimeout(tick, JOB_POLL_INTERVAL_MS);
       } catch {
-        if (!cancelled) setError("Nie udało się odpytać joba");
+        if (cancelled) return;
+        consecutiveErrors += 1;
+        // Nie setError + stop — transient (tunel / GPU) nie może zabijać polla.
+        setPollWarning(
+          `Nie udało się odpytać joba (próba ${consecutiveErrors}) — ponawiam…`
+        );
+        window.setTimeout(
+          tick,
+          Math.min(20_000, JOB_POLL_INTERVAL_MS * (1 + consecutiveErrors))
+        );
       }
     };
     void tick();
     return () => {
       cancelled = true;
     };
-  }, [promptId]);
+  }, [promptId, pipelineId]);
 
   useEffect(() => {
-    if (!promptId || status === "completed" || status === "failed") return;
+    if (!pipelineId) return;
+    let cancelled = false;
+    let consecutiveErrors = 0;
+    const started = Date.now();
+
+    try {
+      window.localStorage.setItem(
+        PIPELINE_STORAGE_KEY,
+        JSON.stringify({ pipelineId, savedAt: Date.now() })
+      );
+    } catch {
+      // ignore
+    }
+
+    const tick = async () => {
+      if (cancelled) return;
+      setStartedAtMs((prev) => prev ?? started);
+      if (Date.now() - started > JOB_POLL_MAX_MS) {
+        setError(
+          "Timeout pipeline wideo. Serwer mógł dokończyć stitch w tle — sprawdź galerię (video-*-stitched)."
+        );
+        return;
+      }
+      try {
+        const res = await fetch(
+          `/api/video/pipeline/${encodeURIComponent(pipelineId)}`
+        );
+        const data = await res.json();
+        if (cancelled) return;
+        if (!data.ok) {
+          consecutiveErrors += 1;
+          setPollWarning(
+            data.error ??
+              `Błąd pipeline (próba ${consecutiveErrors}) — ponawiam…`
+          );
+          window.setTimeout(
+            tick,
+            Math.min(15_000, JOB_POLL_INTERVAL_MS * consecutiveErrors)
+          );
+          return;
+        }
+        consecutiveErrors = 0;
+        setPollWarning(null);
+        const job = data.job as {
+          status: string;
+          outputs?: JobOutput[];
+          progress?: JobProgress;
+          promptId?: string;
+        };
+        if (job.promptId) setPromptId(job.promptId);
+        setStatus(job.status);
+        setOutputs(job.outputs ?? []);
+        if (job.progress) setJobProgress(job.progress);
+        if (data.chunkInfo) {
+          setChunkInfo(
+            data.chunkInfo as { index: number; total: number; label: string }
+          );
+        } else if (job.status === "completed") {
+          setChunkInfo(null);
+        }
+        if (job.status === "failed") {
+          const msg =
+            job.progress?.errorMessage ?? data.error ?? "Pipeline nieudany";
+          setError(msg);
+          setErrorDetail({
+            message: msg,
+            hint: job.progress?.errorHint ?? undefined,
+          });
+          try {
+            window.localStorage.removeItem(PIPELINE_STORAGE_KEY);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        if (job.status === "completed") {
+          try {
+            window.localStorage.removeItem(PIPELINE_STORAGE_KEY);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        window.setTimeout(tick, JOB_POLL_INTERVAL_MS);
+      } catch {
+        if (cancelled) return;
+        consecutiveErrors += 1;
+        setPollWarning(
+          `Nie udało się odpytać pipeline (próba ${consecutiveErrors}) — serwer i tak dociąga chunki; ponawiam…`
+        );
+        window.setTimeout(
+          tick,
+          Math.min(20_000, JOB_POLL_INTERVAL_MS * (1 + consecutiveErrors))
+        );
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [pipelineId]);
+
+  useEffect(() => {
+    if (
+      (!promptId && !pipelineId) ||
+      status === "completed" ||
+      status === "failed"
+    ) {
+      return;
+    }
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [promptId, status]);
+  }, [promptId, pipelineId, status]);
 
   async function uploadStartFile(file: File) {
     setError(null);
@@ -413,55 +587,21 @@ export function GenerateForm({
     setStatus(null);
     setStartedAtMs(null);
     setChunkInfo(null);
-  }
-
-  async function waitForJob(
-    id: string,
-    opts?: { updateOutputs?: boolean; keepRunning?: boolean }
-  ): Promise<{
-    status: string;
-    outputs: JobOutput[];
-    progress?: JobProgress;
-  }> {
-    const updateOutputs = opts?.updateOutputs !== false;
-    for (;;) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const res = await fetch(`/api/jobs/${encodeURIComponent(id)}`);
-      const data = await res.json();
-      if (!data.ok) {
-        throw new Error(data.error ?? "Błąd statusu joba");
-      }
-      const job = data.job as {
-        status: string;
-        outputs?: JobOutput[];
-        progress?: JobProgress;
-      };
-      if (opts?.keepRunning && job.status === "completed") {
-        setStatus("running");
-      } else {
-        setStatus(job.status);
-      }
-      if (updateOutputs) setOutputs(job.outputs ?? []);
-      if (job.progress) setJobProgress(job.progress);
-      if (job.status === "completed" || job.status === "failed") {
-        return {
-          status: job.status,
-          outputs: job.outputs ?? [],
-          progress: job.progress,
-        };
-      }
-    }
+    setPipelineId(null);
+    setPollWarning(null);
   }
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setErrorDetail(null);
+    setPollWarning(null);
     setOutputs([]);
     setJobProgress(null);
     setNodesTotalHint(null);
     setStatus("queued");
     setPromptId(null);
+    setPipelineId(null);
     setChunkInfo(null);
     setStartedAtMs(Date.now());
 
@@ -485,175 +625,74 @@ export function GenerateForm({
           batch: kind === "image" ? batch : 1,
         };
 
-        // ——— Wan/LTX długie wideo: chunki + stitch (Legion pattern) ———
+        // ——— Wan/LTX długie wideo: serwerowy pipeline (c0→c1→stitch) ———
         if (
           kind === "video" &&
           isChunkedVideoEngine(videoEngine) &&
           videoPlan?.chunkPlan?.chunked
         ) {
           const plan = videoPlan.chunkPlan;
-          const clips: Array<{
-            filename: string;
-            subfolder: string;
-            type: string;
-          }> = [];
-          let cursorStart = startImage.trim();
-          let cursorSource = startImageSource;
-          const stitchPrefix =
-            videoEngine === "wan"
-              ? "studio/video-wan-stitched"
-              : "studio/video-ltx-stitched";
-
-          for (const chunk of plan.chunks) {
-            const isLast = chunk.index === plan.chunkCount - 1;
-            setChunkInfo({
-              index: chunk.index + 1,
-              total: plan.chunkCount,
-              label: `chunk ${chunk.index + 1}/${plan.chunkCount} (${chunk.length} klatek)`,
-            });
-            setStatus("queued");
-            setJobProgress({
-              percent: Math.round((chunk.index / plan.chunkCount) * 100),
-              phase: `chunk ${chunk.index + 1}/${plan.chunkCount}`,
-              queuePending: 0,
-              queueRunning: false,
-              currentNodeId: null,
-              currentNodeType: null,
-              nodesDone: null,
-              nodesTotal: null,
-              executionStartMs: null,
-              errorMessage: null,
-              errorHint: null,
-              errorLinkHref: null,
-              errorLinkLabel: null,
-            });
-
-            const body = {
-              ...baseBody,
-              durationSec,
-              fps,
-              startImage: cursorStart,
-              videoEngine,
-              faceRestore,
-              ltxChunkLength: chunk.length,
-              ltxSaveTail: !isLast,
-              ltxChunkIndex: chunk.index,
-              ...(cursorSource ? { startImageSource: cursorSource } : {}),
-            };
-
-            const res = await fetch("/api/generate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(body),
-            });
-            const data = await res.json();
-            if (!data.ok) {
-              applyGenerateError(data);
-              return;
-            }
-            if (typeof data.modelPrompt === "string" && data.modelPrompt) {
-              setModelPromptPreview(data.modelPrompt);
-            }
-            setPromptId(data.promptId);
-            const job = await waitForJob(data.promptId as string, {
-              updateOutputs: false,
-              keepRunning: true,
-            });
-            if (job.status === "failed") {
-              setError(job.progress?.errorMessage ?? "Chunk nieudany");
-              setStatus("failed");
-              setChunkInfo(null);
-              return;
-            }
-            const picked = pickChunkOutputs(job.outputs);
-            if (!picked.video) {
-              setError("Chunk zakończony bez pliku mp4 w outputach.");
-              setStatus("failed");
-              setChunkInfo(null);
-              return;
-            }
-            clips.push(picked.video);
-            if (!isLast) {
-              if (!picked.tail) {
-                setError(
-                  "Brak klatki końcowej (ltx-tail) — nie można kontynuować chunków."
-                );
-                setStatus("failed");
-                setChunkInfo(null);
-                return;
-              }
-              cursorStart = picked.tail.filename;
-              cursorSource = {
-                filename: picked.tail.filename,
-                subfolder: picked.tail.subfolder,
-                type: picked.tail.type,
-              };
-            }
-          }
-
           setChunkInfo({
-            index: plan.chunkCount,
+            index: 1,
             total: plan.chunkCount,
-            label: `sklejanie ${clips.length} odcinków…`,
+            label: `chunk 1/${plan.chunkCount} (serwer orkiestruje ${plan.chunkCount} odcinki + stitch)`,
           });
-          setStatus("running");
           setJobProgress({
-            percent: 95,
-            phase: "ffmpeg stitch",
+            percent: 2,
+            phase: `chunk 1/${plan.chunkCount}`,
             queuePending: 0,
             queueRunning: false,
             currentNodeId: null,
             currentNodeType: null,
             nodesDone: null,
             nodesTotal: null,
-            executionStartMs: null,
+            executionStartMs: Date.now(),
             errorMessage: null,
             errorHint: null,
             errorLinkHref: null,
             errorLinkLabel: null,
           });
 
-          const stitchRes = await fetch("/api/video/stitch", {
+          const body = {
+            ...baseBody,
+            durationSec,
+            fps,
+            startImage: startImage.trim(),
+            videoEngine,
+            faceRestore,
+            ...(startImageSource ? { startImageSource } : {}),
+          };
+
+          const res = await fetch("/api/video/pipeline", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              clips,
-              fps,
-              overlapFrames: plan.overlap,
-              filenamePrefix: stitchPrefix,
-            }),
+            body: JSON.stringify(body),
           });
-          const stitchData = await stitchRes.json();
-          if (!stitchData.ok) {
-            setError(stitchData.error ?? "Stitch nieudany");
-            setStatus("failed");
-            setChunkInfo(null);
+          const data = await res.json();
+          if (!data.ok) {
+            applyGenerateError(data);
             return;
           }
-          setOutputs([
-            {
-              filename: stitchData.filename as string,
-              subfolder: (stitchData.subfolder as string) || "studio",
-              type: (stitchData.type as string) || "output",
-            },
-          ]);
-          setStatus("completed");
-          setChunkInfo(null);
-          setJobProgress({
-            percent: 100,
-            phase: "gotowe (stitched)",
-            queuePending: 0,
-            queueRunning: false,
-            currentNodeId: null,
-            currentNodeType: null,
-            nodesDone: null,
-            nodesTotal: null,
-            executionStartMs: null,
-            errorMessage: null,
-            errorHint: null,
-            errorLinkHref: null,
-            errorLinkLabel: null,
-          });
+          if (typeof data.modelPrompt === "string" && data.modelPrompt) {
+            setModelPromptPreview(data.modelPrompt);
+            setBoostOpen(true);
+          }
+          if (typeof data.modelNegative === "string") {
+            setModelNegativePreview(data.modelNegative);
+          }
+          if (data.promptBoost?.warnings?.length) {
+            setBoostWarnings(data.promptBoost.warnings);
+          }
+          if (data.chunkInfo) {
+            setChunkInfo(
+              data.chunkInfo as { index: number; total: number; label: string }
+            );
+          }
+          setPipelineId(data.pipelineId as string);
+          if (typeof data.promptId === "string") {
+            setPromptId(data.promptId);
+          }
+          setStatus("queued");
           return;
         }
 
@@ -1215,6 +1254,12 @@ export function GenerateForm({
           </div>
         ) : null}
 
+        {pollWarning && !error ? (
+          <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-sm text-amber-100/90">
+            {pollWarning}
+          </p>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
@@ -1225,9 +1270,13 @@ export function GenerateForm({
               ? chunkInfo
                 ? `Chunk ${chunkInfo.index}/${chunkInfo.total}…`
                 : "Kolejkuję…"
-              : kind === "video"
-                ? "Generuj wideo"
-                : "Generuj obraz"}
+              : pipelineId && status && status !== "completed" && status !== "failed"
+                ? chunkInfo
+                  ? `Pipeline ${chunkInfo.index}/${chunkInfo.total}…`
+                  : "Pipeline…"
+                : kind === "video"
+                  ? "Generuj wideo"
+                  : "Generuj obraz"}
           </button>
           <Link
             href="/gallery"
@@ -1247,6 +1296,7 @@ export function GenerateForm({
             <GenerationProgressPanel
               status={status}
               promptId={promptId}
+              pipelineId={pipelineId}
               progress={jobProgress}
               nodesTotalHint={nodesTotalHint}
               startedAtMs={startedAtMs}
@@ -1342,6 +1392,7 @@ function formatElapsed(ms: number): string {
 function GenerationProgressPanel({
   status,
   promptId,
+  pipelineId,
   progress,
   nodesTotalHint,
   startedAtMs,
@@ -1350,6 +1401,7 @@ function GenerationProgressPanel({
 }: {
   status: string | null;
   promptId: string | null;
+  pipelineId: string | null;
   progress: JobProgress | null;
   nodesTotalHint: number | null;
   startedAtMs: number | null;
@@ -1423,6 +1475,12 @@ function GenerationProgressPanel({
             <dd className="inline font-mono text-stone-400">
               {chunkInfo.index}/{chunkInfo.total}
             </dd>
+          </div>
+        ) : null}
+        {pipelineId ? (
+          <div className="sm:col-span-2">
+            <dt className="inline text-stone-600">pipeline · </dt>
+            <dd className="inline font-mono text-stone-400">{pipelineId}</dd>
           </div>
         ) : null}
         {promptId ? (
