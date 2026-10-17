@@ -38,6 +38,11 @@ import {
   DEFAULT_WAN_UNET,
   DEFAULT_WAN_UNET_720P,
 } from "@/lib/studio/video-engines";
+import {
+  mergeJobProgressWithWs,
+  useComfyWsProgress,
+} from "@/components/studio/use-comfy-ws-progress";
+
 type JobOutput = {
   filename: string;
   subfolder: string;
@@ -74,6 +79,8 @@ type Props = {
   kind?: "image" | "video";
   videoLimitsNote?: string;
   imageLimitsNote?: string;
+  /** Publiczny COMFYUI_URL — live WS progress (sampling i/N). */
+  comfyUrl?: string | null;
 };
 
 export function GenerateForm({
@@ -83,6 +90,7 @@ export function GenerateForm({
   kind = "image",
   videoLimitsNote,
   imageLimitsNote,
+  comfyUrl = null,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(defaultModel);
@@ -183,6 +191,15 @@ export function GenerateForm({
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
+
+  const wsEnabled = Boolean(
+    promptId &&
+      status &&
+      status !== "completed" &&
+      status !== "failed"
+  );
+  const wsOverlay = useComfyWsProgress(comfyUrl, promptId, wsEnabled);
+  const displayProgress = mergeJobProgressWithWs(jobProgress, wsOverlay);
 
   const videoPlan =
     kind === "video"
@@ -757,7 +774,10 @@ export function GenerateForm({
           });
           setJobProgress({
             percent: 2,
-            phase: `chunk 1/${plan.chunkCount}`,
+            stage: "queued",
+            step: null,
+            stepMax: null,
+            phase: `W kolejce — ${videoEngine === "ltx" ? "LTX" : "Wan"} chunk 1/${plan.chunkCount}`,
             queuePending: 0,
             queueRunning: false,
             currentNodeId: null,
@@ -870,7 +890,10 @@ export function GenerateForm({
         setPromptId(data.promptId);
         setJobProgress({
           percent: 5,
-          phase: "w kolejce",
+          stage: "queued",
+          step: null,
+          stepMax: null,
+          phase: "W kolejce Comfy (następny)…",
           queuePending: 0,
           queueRunning: false,
           currentNodeId: null,
@@ -1570,7 +1593,7 @@ export function GenerateForm({
               status={status}
               promptId={promptId}
               pipelineId={pipelineId}
-              progress={jobProgress}
+              progress={displayProgress}
               nodesTotalHint={nodesTotalHint}
               startedAtMs={startedAtMs}
               nowMs={nowMs}
@@ -1686,32 +1709,26 @@ function GenerationProgressPanel({
   const start = startedAtMs;
   const elapsed = start ? nowMs - start : null;
 
-  let percent = progress?.percent;
-  if (chunkInfo && status !== "completed" && status !== "failed") {
-    const base = ((chunkInfo.index - 1) / chunkInfo.total) * 100;
-    const within =
-      progress?.percent != null
-        ? (progress.percent / 100) * (100 / chunkInfo.total)
-        : 0;
-    percent = Math.min(99, Math.round(base + within));
+  // Pipeline już mapuje % na całe pasmo — nie dubluj chunków w UI.
+  let percent = progress?.percent ?? null;
+  if (percent == null && status === "queued") percent = 5;
+  if (
+    percent == null &&
+    status === "running" &&
+    nodesTotal &&
+    nodesDone != null
+  ) {
+    percent = Math.min(95, Math.round((nodesDone / nodesTotal) * 100));
   }
-  if (percent == null && status === "queued") percent = 8;
-  if (percent == null && status === "running") {
-    percent =
-      nodesTotal && nodesDone != null
-        ? Math.min(95, Math.round((nodesDone / nodesTotal) * 100))
-        : elapsed != null
-          ? Math.min(85, 15 + Math.floor(elapsed / 1000))
-          : null;
-  }
+  // Bez sztucznego climb z elapsed (kłamliwe ~25% / rosnące %).
   if (status === "completed") percent = 100;
   if (status === "failed") percent = 100;
 
   const indeterminate =
     percent == null && (status === "running" || status === "queued");
   const width = percent != null ? `${percent}%` : indeterminate ? "40%" : "0%";
-  const phaseLabel =
-    chunkInfo?.label || progress?.phase || status || "…";
+  // progress.phase ma sampling i/N; chunkInfo.label bywa ogólny — preferuj phase
+  const phaseLabel = progress?.phase || chunkInfo?.label || status || "…";
 
   return (
     <div className="mb-3 space-y-3">
@@ -1719,15 +1736,12 @@ function GenerationProgressPanel({
         <p className="text-sm text-stone-400">
           Status:{" "}
           <span className="text-teal-200">{phaseLabel}</span>
-          {status &&
-          !chunkInfo &&
-          progress?.phase &&
-          status !== progress.phase ? (
-            <span className="ml-1 text-stone-600">({status})</span>
-          ) : null}
         </p>
         <p className="font-mono text-xs text-stone-500">
-          {percent != null ? `${percent}%` : "…"}
+          {percent != null ? `${percent}%` : indeterminate ? "…" : "—"}
+          {progress?.step != null && progress.stepMax
+            ? ` · step ${progress.step}/${progress.stepMax}`
+            : null}
           {elapsed != null ? ` · ${formatElapsed(elapsed)}` : null}
         </p>
       </div>
@@ -1736,7 +1750,7 @@ function GenerationProgressPanel({
           className={[
             "h-full rounded-full bg-teal-400 transition-[width] duration-500",
             indeterminate ? "animate-pulse" : "",
-            status === "failed" ? "bg-rose-400" : "",
+            status === "failed" ? "!bg-rose-400" : "",
           ].join(" ")}
           style={{ width }}
         />

@@ -1,4 +1,5 @@
 import { GenerateForm } from "@/components/studio/generate-form";
+import { getStudioPublicConfig } from "@/lib/studio/config";
 import {
   listInstalledCheckpoints,
   listInstalledDiffusionModels,
@@ -19,6 +20,7 @@ export default async function StudioVideoPage() {
     listInstalledCheckpoints(),
     listInstalledDiffusionModels(),
   ]);
+  const { comfyUrl } = getStudioPublicConfig();
   const hasWan = diffusionModels.some((c) => c.toLowerCase().includes("wan"));
   const hasLtx = checkpoints.some((c) => c.toLowerCase().includes("ltx"));
   const hasSvd = checkpoints.some((c) => c.toLowerCase().includes("svd"));
@@ -83,6 +85,7 @@ export default async function StudioVideoPage() {
         ]}
         kind="video"
         videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s`}
+        comfyUrl={comfyUrl}
       />
     </div>
   );

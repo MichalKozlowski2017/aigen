@@ -1,5 +1,16 @@
 import { friendlyComfyError, formatFriendlyErrorLines } from "./comfy-errors";
 import { normalizeComfyMediaRef } from "./comfy-media";
+import {
+  classifyNodeType,
+  formatPolishPhase,
+  percentForStage,
+  type ProgressStage,
+} from "./comfy-progress";
+import {
+  ensureLiveProgressFeed,
+  getCachedExecutingNode,
+  getCachedLiveProgress,
+} from "./comfy-progress-live";
 import { getComfyUrl } from "./config";
 import type { ComfyHealth } from "./types";
 
@@ -144,9 +155,15 @@ export async function getHistory(promptId?: string): Promise<unknown> {
 }
 
 export type JobProgress = {
-  /** 0–100; null = nieznany / indeterminate */
+  /** 0–100; null = nieznany / indeterminate (nie kłam 25%) */
   percent: number | null;
   phase: string;
+  /** Klucz etapu do UI / pipeline */
+  stage: ProgressStage;
+  /** Sampling step (Comfy WS progress.value) */
+  step: number | null;
+  /** Sampling max (Comfy WS progress.max) */
+  stepMax: number | null;
   queuePending: number;
   queueRunning: boolean;
   currentNodeId: string | null;
@@ -172,10 +189,13 @@ export type JobStatus = {
   raw?: unknown;
 };
 
-function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
+export function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
   return {
     percent: null,
     phase: "nieznany",
+    stage: "unknown",
+    step: null,
+    stepMax: null,
     queuePending: 0,
     queueRunning: false,
     currentNodeId: null,
@@ -300,6 +320,54 @@ function parseHistoryProgress(entry: unknown): {
   return { failed, completed, executionStartMs, nodesDone, errorRaw };
 }
 
+function buildRunningProgress(opts: {
+  promptId: string;
+  workflow: unknown;
+  queuePending: number;
+  nodesDone?: number | null;
+  nodesTotal?: number | null;
+  executionStartMs?: number | null;
+}): JobProgress {
+  const live = getCachedLiveProgress(opts.promptId);
+  const nodeId =
+    getCachedExecutingNode(opts.promptId) ?? live?.nodeId ?? null;
+  const nodeType = classTypeFromWorkflow(opts.workflow, nodeId);
+  const stage: ProgressStage =
+    live && live.max > 0
+      ? "sampling"
+      : classifyNodeType(nodeType);
+  const step = live && live.max > 0 ? live.value : null;
+  const stepMax = live && live.max > 0 ? live.max : null;
+  const percent = percentForStage({
+    stage,
+    step,
+    stepMax,
+    nodesDone: opts.nodesDone ?? null,
+    nodesTotal: opts.nodesTotal ?? null,
+  });
+  return emptyProgress({
+    percent,
+    stage,
+    step,
+    stepMax,
+    phase: formatPolishPhase({
+      stage,
+      nodeType,
+      step,
+      stepMax,
+      nodesDone: opts.nodesDone,
+      nodesTotal: opts.nodesTotal,
+    }),
+    queuePending: opts.queuePending,
+    queueRunning: true,
+    currentNodeId: nodeId,
+    currentNodeType: nodeType,
+    nodesDone: opts.nodesDone ?? null,
+    nodesTotal: opts.nodesTotal ?? null,
+    executionStartMs: opts.executionStartMs ?? null,
+  });
+}
+
 export async function getJobStatus(promptId: string): Promise<JobStatus> {
   let queuePending = 0;
   let queueRunning = false;
@@ -327,6 +395,11 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
     // ignore queue errors
   }
 
+  // Live sampling/node z Comfy WS (gdy tunel pozwala) — bez sztucznego 25%
+  if (queueRunning || pendingIndex >= 0) {
+    await ensureLiveProgressFeed(queueRunning ? 700 : 0);
+  }
+
   try {
     const history = (await getHistory(promptId)) as Record<string, unknown>;
     const entry = history[promptId];
@@ -350,7 +423,8 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
           outputs,
           progress: emptyProgress({
             percent: 100,
-            phase: "błąd",
+            stage: "fail",
+            phase: formatPolishPhase({ stage: "fail" }),
             queuePending,
             queueRunning: false,
             nodesDone,
@@ -372,7 +446,8 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
           outputs,
           progress: emptyProgress({
             percent: 100,
-            phase: "gotowe",
+            stage: "done",
+            phase: formatPolishPhase({ stage: "done" }),
             queuePending,
             queueRunning: false,
             nodesDone: nodesTotal,
@@ -383,20 +458,15 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
         };
       }
 
-      // W historii, ale jeszcze nie completed — rzadkie
-      const pct =
-        nodesTotal && nodesDone != null
-          ? Math.min(95, Math.round((nodesDone / nodesTotal) * 100))
-          : 40;
+      // W historii, ale jeszcze nie completed — połącz z live WS
       return {
         promptId,
         status: "running",
         outputs,
-        progress: emptyProgress({
-          percent: pct,
-          phase: "w trakcie",
+        progress: buildRunningProgress({
+          promptId,
+          workflow: promptWf,
           queuePending,
-          queueRunning: true,
           nodesDone,
           nodesTotal,
           executionStartMs: parsed.executionStartMs,
@@ -414,13 +484,10 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
       promptId,
       status: "running",
       outputs: [],
-      progress: emptyProgress({
-        percent: nodesTotal ? 25 : null,
-        phase: "uruchomione w ComfyUI",
+      progress: buildRunningProgress({
+        promptId,
+        workflow: runningPrompt,
         queuePending,
-        queueRunning: true,
-        currentNodeId: null,
-        currentNodeType: classTypeFromWorkflow(runningPrompt, null),
         nodesTotal,
       }),
     };
@@ -428,17 +495,15 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
 
   if (pendingIndex >= 0) {
     const ahead = pendingIndex;
-    const percent = Math.max(2, Math.min(20, 5 + ahead * 0));
+    const stage: ProgressStage = "queued";
     return {
       promptId,
       status: "queued",
       outputs: [],
       progress: emptyProgress({
-        percent,
-        phase:
-          ahead === 0
-            ? "w kolejce (następny)"
-            : `w kolejce (przed Tobą: ${ahead})`,
+        percent: percentForStage({ stage }),
+        stage,
+        phase: formatPolishPhase({ stage, queueAhead: ahead }),
         queuePending,
         queueRunning: false,
       }),
@@ -451,7 +516,8 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
     outputs: [],
     progress: emptyProgress({
       percent: null,
-      phase: "oczekiwanie na status…",
+      stage: "unknown",
+      phase: formatPolishPhase({ stage: "unknown" }),
       queuePending,
     }),
   };
