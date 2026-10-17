@@ -3,7 +3,11 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import type { JobProgress } from "@/lib/studio/comfy-client";
-import { DEFAULT_SDXL_NEGATIVE } from "@/lib/studio/defaults";
+import {
+  DEFAULT_SDXL_NEGATIVE,
+  DEFAULT_WAN_NEGATIVE,
+  VIDEO_CAMERA_GUARD,
+} from "@/lib/studio/defaults";
 import {
   FLUX_MODEL_ID,
   isFluxModel,
@@ -15,16 +19,21 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  WAN_FPS_OPTIONS,
+  WAN_QUALITY_PRESETS,
   WAN_UI_LIMITS,
   isChunkedVideoEngine,
   planLtxVideo,
   planSvdVideo,
   planWanVideo,
+  snapWanFps,
   type VideoEngineId,
+  type WanQualityPresetId,
 } from "@/lib/studio/workflow-builder";
 import {
   DEFAULT_LTX_CHECKPOINT,
   DEFAULT_WAN_UNET,
+  DEFAULT_WAN_UNET_720P,
 } from "@/lib/studio/video-engines";
 type JobOutput = {
   filename: string;
@@ -82,6 +91,12 @@ export function GenerateForm({
     kind === "video" ? DEFAULT_VIDEO_ENGINE : "svd"
   );
   const [faceRestore, setFaceRestore] = useState(false);
+  const [faceRestoreFidelity, setFaceRestoreFidelity] = useState(0.5);
+  const [qualityPreset, setQualityPreset] =
+    useState<WanQualityPresetId>("fast-480p");
+  const [steps, setSteps] = useState<number>(12);
+  const [postRife, setPostRife] = useState(false);
+  const [postUpscale, setPostUpscale] = useState(false);
   const videoLimits =
     videoEngine === "wan"
       ? WAN_UI_LIMITS
@@ -180,23 +195,54 @@ export function GenerateForm({
     label: string;
   } | null>(null);
 
+  function pickWanModel(prefer720: boolean): string {
+    if (prefer720) {
+      return (
+        checkpoints.find((c) =>
+          c.toLowerCase().includes("wan2.1_i2v_720p")
+        ) ??
+        checkpoints.find((c) => c.toLowerCase().includes("720p") && c.toLowerCase().includes("wan")) ??
+        DEFAULT_WAN_UNET_720P
+      );
+    }
+    return (
+      checkpoints.find((c) => c.toLowerCase().includes("wan2.1_i2v_480p")) ??
+      checkpoints.find((c) => c.toLowerCase().includes("wan2.1_i2v")) ??
+      checkpoints.find((c) => c.toLowerCase().includes("wan")) ??
+      DEFAULT_WAN_UNET
+    );
+  }
+
+  function applyWanPreset(id: WanQualityPresetId) {
+    const preset = WAN_QUALITY_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    setQualityPreset(id);
+    setVideoEngine("wan");
+    setWidth(preset.width);
+    setHeight(preset.height);
+    setFps(preset.fps);
+    setSteps(preset.steps);
+    setFaceRestore(preset.faceRestore);
+    setFaceRestoreFidelity(preset.faceRestoreFidelity);
+    setPostRife(preset.postRife);
+    setPostUpscale(preset.postUpscale);
+    setModel(pickWanModel(preset.width >= 1024 || preset.id === "quality-720p"));
+    if (!negativePrompt.trim()) {
+      setNegativePrompt(DEFAULT_WAN_NEGATIVE);
+    }
+  }
+
   function applyVideoEngine(next: VideoEngineId) {
     setVideoEngine(next);
     if (next === "wan") {
-      setWidth(WAN_UI_LIMITS.defaultWidth);
-      setHeight(WAN_UI_LIMITS.defaultHeight);
-      setDurationSec(WAN_UI_LIMITS.defaultDurationSec);
-      setFps(WAN_UI_LIMITS.defaultFps);
-      const wan =
-        checkpoints.find((c) => c.toLowerCase().includes("wan2.1_i2v")) ??
-        checkpoints.find((c) => c.toLowerCase().includes("wan")) ??
-        DEFAULT_WAN_UNET;
-      setModel(wan);
+      applyWanPreset(qualityPreset);
     } else if (next === "ltx") {
       setWidth(LTX_UI_LIMITS.defaultWidth);
       setHeight(LTX_UI_LIMITS.defaultHeight);
       setDurationSec(LTX_UI_LIMITS.defaultDurationSec);
       setFps(LTX_UI_LIMITS.defaultFps);
+      setPostRife(false);
+      setPostUpscale(false);
       if (!model.toLowerCase().includes("ltx")) {
         setModel(DEFAULT_LTX_CHECKPOINT);
       }
@@ -205,6 +251,8 @@ export function GenerateForm({
       setHeight(SVD_UI_LIMITS.defaultHeight);
       setDurationSec(SVD_UI_LIMITS.defaultDurationSec);
       setFps(SVD_UI_LIMITS.defaultFps);
+      setPostRife(false);
+      setPostUpscale(false);
       const svd =
         checkpoints.find((c) => c.toLowerCase().includes("svd")) ??
         "svd_xt.safetensors";
@@ -270,7 +318,10 @@ export function GenerateForm({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt,
-            negativePrompt: kind === "image" ? negativePrompt : "",
+            negativePrompt:
+              kind === "video"
+                ? negativePrompt.trim() || DEFAULT_WAN_NEGATIVE
+                : negativePrompt,
             kind,
           }),
         });
@@ -617,25 +668,38 @@ export function GenerateForm({
         const baseBody: Record<string, unknown> = {
           kind,
           prompt,
-          negativePrompt,
+          negativePrompt:
+            kind === "video"
+              ? negativePrompt.trim() || DEFAULT_WAN_NEGATIVE
+              : negativePrompt,
           model,
           width,
           height,
           seed,
           batch: kind === "image" ? batch : 1,
+          ...(kind === "video" && videoEngine === "wan"
+            ? { steps, qualityPreset }
+            : {}),
         };
 
-        // ——— Wan/LTX długie wideo: serwerowy pipeline (c0→c1→stitch) ———
-        if (
+        const usePipeline =
           kind === "video" &&
           isChunkedVideoEngine(videoEngine) &&
-          videoPlan?.chunkPlan?.chunked
-        ) {
-          const plan = videoPlan.chunkPlan;
+          (Boolean(videoPlan?.chunkPlan?.chunked) || postRife || postUpscale);
+
+        // ——— Wan/LTX: serwerowy pipeline (chunki + opcjonalnie RIFE/upscale) ———
+        if (usePipeline) {
+          const plan = videoPlan!.chunkPlan!;
           setChunkInfo({
             index: 1,
             total: plan.chunkCount,
-            label: `chunk 1/${plan.chunkCount} (serwer orkiestruje ${plan.chunkCount} odcinki + stitch)`,
+            label: plan.chunked
+              ? `chunk 1/${plan.chunkCount} (serwer orkiestruje ${plan.chunkCount} odcinki + stitch${
+                  postRife || postUpscale ? " + post" : ""
+                })`
+              : `1 chunk + post (${postRife ? "RIFE" : ""}${
+                  postRife && postUpscale ? "+" : ""
+                }${postUpscale ? "upscale" : ""})`,
           });
           setJobProgress({
             percent: 2,
@@ -656,10 +720,13 @@ export function GenerateForm({
           const body = {
             ...baseBody,
             durationSec,
-            fps,
+            fps: videoEngine === "wan" ? snapWanFps(fps) : fps,
             startImage: startImage.trim(),
             videoEngine,
             faceRestore,
+            faceRestoreFidelity,
+            postRife,
+            postUpscale,
             ...(startImageSource ? { startImageSource } : {}),
           };
 
@@ -700,10 +767,17 @@ export function GenerateForm({
         const body: Record<string, unknown> = { ...baseBody };
         if (kind === "video") {
           body.durationSec = durationSec;
-          body.fps = fps;
+          body.fps = videoEngine === "wan" ? snapWanFps(fps) : fps;
           body.startImage = startImage.trim();
           body.videoEngine = videoEngine;
           body.faceRestore = faceRestore;
+          body.faceRestoreFidelity = faceRestoreFidelity;
+          body.postRife = postRife;
+          body.postUpscale = postUpscale;
+          if (videoEngine === "wan") {
+            body.steps = steps;
+            body.qualityPreset = qualityPreset;
+          }
           if (
             isChunkedVideoEngine(videoEngine) &&
             videoPlan?.chunkPlan?.chunks[0]
@@ -771,9 +845,22 @@ export function GenerateForm({
             checkpoints.length > 0
               ? Array.from(new Set([defaultModel, ...checkpoints]))
               : [defaultModel];
+          // Upewnij się, że 480p/720p Wan są na liście nawet gdy Comfy offline
+          if (kind === "video" && videoEngine === "wan") {
+            for (const wanName of [DEFAULT_WAN_UNET, DEFAULT_WAN_UNET_720P]) {
+              if (!values.includes(wanName)) values.push(wanName);
+            }
+          }
           return values.map((value) => ({
             value,
-            label: value === FLUX_MODEL_ID ? "Flux.2 Dev (fp8)" : value,
+            label:
+              value === FLUX_MODEL_ID
+                ? "Flux.2 Dev (fp8)"
+                : value.toLowerCase().includes("wan2.1_i2v_720p")
+                  ? "Wan 2.1 I2V 720p FP8"
+                  : value.toLowerCase().includes("wan2.1_i2v_480p")
+                    ? "Wan 2.1 I2V 480p FP8"
+                    : value,
             engine: isFluxModel(value) ? ("flux" as const) : ("sdxl" as const),
           }));
         })();
@@ -813,12 +900,45 @@ export function GenerateForm({
                     fotoreal / wolniej / offload
                   </span>
                   {" — "}
-                  Wan 2.1 I2V FP8 (480p) + Dynamic VRAM na ~16 GB. Dłuższe klipy =
-                  chunki (≤{WAN_UI_LIMITS.maxLength} klatek) + stitch. LTX zostaje
-                  jako szybszy draft.
+                  Wan 2.1 I2V FP8 (480p/720p) · FPS 16|24 · SAFE ≤
+                  {WAN_UI_LIMITS.maxLength} klatek/chunk. @24 fps / 10 s ≈ 3
+                  chunki. Smooth 24 = gen 16 + RIFE (Comfy, graceful).
                 </p>
               ) : null}
             </fieldset>
+
+            {videoEngine === "wan" ? (
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                  Preset jakości
+                </legend>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {WAN_QUALITY_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => applyWanPreset(p.id)}
+                      className={[
+                        "rounded-lg border px-3 py-2 text-left text-sm transition",
+                        qualityPreset === p.id
+                          ? "border-amber-400/45 bg-amber-400/10 text-amber-50"
+                          : "border-white/10 bg-white/[0.03] text-stone-300 hover:border-white/20",
+                      ].join(" ")}
+                    >
+                      <span className="block font-medium">{p.label}</span>
+                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                        {p.blurb}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  Prompt guard:{" "}
+                  <span className="text-stone-400">{VIDEO_CAMERA_GUARD}</span>
+                  . Negatyw domyślny: morphing hands / zoom-in / camera shake.
+                </p>
+              </fieldset>
+            ) : null}
 
             <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
               <input
@@ -830,13 +950,56 @@ export function GenerateForm({
               <span>
                 <span className="block text-sm text-stone-200">
                   Face restore (CodeFormer)
+                  {faceRestore && faceRestoreFidelity < 0.45 ? (
+                    <span className="ml-1 text-amber-200/80">· mocniejszy</span>
+                  ) : null}
                 </span>
                 <span className="block text-[11px] text-stone-500">
                   Per chunk. Wymaga facerestore_cf + codeformer.pth na Legionie.
-                  Lekko spowalnia i zużywa VRAM.
+                  Quality preset ustawia silniejszy restore.
                 </span>
               </span>
             </label>
+
+            {videoEngine === "wan" ? (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={postRife}
+                    onChange={(e) => {
+                      setPostRife(e.target.checked);
+                      if (e.target.checked) setQualityPreset("smooth-24");
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm text-stone-200">
+                      Post RIFE → 24 fps
+                    </span>
+                    <span className="block text-[11px] text-stone-500">
+                      Po stitch. Graceful gdy brak node’a na Legionie.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={postUpscale}
+                    onChange={(e) => setPostUpscale(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm text-stone-200">
+                      Post upscale 2×
+                    </span>
+                    <span className="block text-[11px] text-stone-500">
+                      RealESRGAN po stitch (opcjonalnie).
+                    </span>
+                  </span>
+                </label>
+              </div>
+            ) : null}
 
             <label className="block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Obraz startowy
@@ -1022,7 +1185,7 @@ export function GenerateForm({
           ) : null}
         </div>
 
-        {kind === "image" && !fluxSelected ? (
+        {(kind === "image" && !fluxSelected) || kind === "video" ? (
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Negatyw
@@ -1030,9 +1193,20 @@ export function GenerateForm({
             <textarea
               value={negativePrompt}
               onChange={(e) => setNegativePrompt(e.target.value)}
-              rows={2}
+              rows={kind === "video" ? 3 : 2}
+              placeholder={
+                kind === "video"
+                  ? DEFAULT_WAN_NEGATIVE
+                  : DEFAULT_SDXL_NEGATIVE
+              }
               className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-stone-100 outline-none focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
             />
+            {kind === "video" ? (
+              <p className="mt-1 text-[11px] text-stone-500">
+                Puste = domyślny Wan (hands / zoom / shake). Serwer i tak dociąga
+                brakujące tokeny.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -1135,16 +1309,45 @@ export function GenerateForm({
                   className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label={`FPS (max ${videoLimits.maxFps})`}>
-                <input
-                  type="number"
-                  min={1}
-                  max={videoLimits.maxFps}
-                  value={fps}
-                  onChange={(e) => setFps(Number(e.target.value))}
-                  className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
-                />
-              </Field>
+              {videoEngine === "wan" ? (
+                <Field label="FPS (16 | 24)">
+                  <select
+                    value={snapWanFps(fps)}
+                    onChange={(e) => setFps(Number(e.target.value))}
+                    className="w-full rounded-lg border border-white/10 bg-[#0b1614] px-3 py-2 text-sm"
+                  >
+                    {WAN_FPS_OPTIONS.map((f) => (
+                      <option key={f} value={f}>
+                        {f} fps
+                        {f === 24 ? " · native (~3 chunki @10s)" : " · Fast / Smooth"}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : (
+                <Field label={`FPS (max ${videoLimits.maxFps})`}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={videoLimits.maxFps}
+                    value={fps}
+                    onChange={(e) => setFps(Number(e.target.value))}
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                  />
+                </Field>
+              )}
+              {videoEngine === "wan" ? (
+                <Field label="Steps">
+                  <input
+                    type="number"
+                    min={4}
+                    max={40}
+                    value={steps}
+                    onChange={(e) => setSteps(Number(e.target.value))}
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                  />
+                </Field>
+              ) : null}
             </>
           )}
         </div>
@@ -1215,10 +1418,16 @@ export function GenerateForm({
             {videoRisky ? (
               <p className="text-amber-200/85">
                 {videoEngine === "wan"
-                  ? `Uwaga VRAM (~16 GB): chunk >~${WAN_UI_LIMITS.comfortLength} klatek — provisional SAFE ${WAN_UI_LIMITS.maxLength} @ 832×480 FP8 + offload; dłuższe idzie chunkami.`
+                  ? `Uwaga VRAM (~16 GB): SAFE ${WAN_UI_LIMITS.maxLength} klatek/chunk (4n+1). 720p / dłuższe chunki = więcej offloadu; @24fps/10s ≈3 odcinki.`
                   : videoEngine === "ltx"
                     ? `Uwaga VRAM (~16 GB): chunk >~${LTX_UI_LIMITS.comfortLength} klatek — Legion SAFE to ${LTX_UI_LIMITS.maxLength} @ 768×512; dłuższe wideo idzie chunkami.`
                     : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
+              </p>
+            ) : null}
+            {videoEngine === "wan" && postRife ? (
+              <p className="text-teal-100/75">
+                Smooth 24: generacja @ {fps} fps → RIFE po stitch do 24 fps
+                (graceful, jeśli brak node’a na Legionie).
               </p>
             ) : null}
           </div>

@@ -28,6 +28,16 @@ export const generateBodySchema = z.object({
   videoEngine: z.enum(["wan", "ltx", "svd"]).optional(),
   /** CodeFormer (facerestore_cf) na klatkach przed VHS — per chunk */
   faceRestore: z.boolean().optional().default(false),
+  /** CodeFormer fidelity 0–1 (niżej = mocniejszy restore) */
+  faceRestoreFidelity: z.number().min(0).max(1).optional(),
+  /** Preset Wan: fast-480p | smooth-24 | quality-720p | quality-24-native */
+  qualityPreset: z
+    .enum(["fast-480p", "smooth-24", "quality-720p", "quality-24-native"])
+    .optional(),
+  /** Po stitch: Comfy RIFE 16→24 (graceful jeśli node brak) */
+  postRife: z.boolean().optional().default(false),
+  /** Po stitch: RealESRGAN / upscale 2× (graceful) */
+  postUpscale: z.boolean().optional().default(false),
   /** Długość jednego chunka (Wan 4n+1 ≤81 / LTX 8n+1 ≤121) */
   ltxChunkLength: z.number().int().min(9).max(121).optional(),
   /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji chunków */

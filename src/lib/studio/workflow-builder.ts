@@ -1,6 +1,6 @@
 import type { GenerateBody } from "./schemas";
 import { getDefaultCheckpoint } from "./config";
-import { DEFAULT_SDXL_NEGATIVE } from "./defaults";
+import { DEFAULT_SDXL_NEGATIVE, DEFAULT_WAN_NEGATIVE } from "./defaults";
 import {
   DEFAULT_FLUX_CLIP_TYPE,
   DEFAULT_FLUX_GUIDANCE,
@@ -18,7 +18,6 @@ import {
   DEFAULT_VIDEO_ENGINE,
   DEFAULT_WAN_CLIP,
   DEFAULT_WAN_CLIP_VISION,
-  DEFAULT_WAN_UNET,
   DEFAULT_WAN_VAE,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
@@ -26,7 +25,9 @@ import {
   effectiveDurationSec,
   maxLtxDurationAtFps,
   maxWanDurationAtFps,
+  resolveWanUnet,
   snapLtxLength,
+  snapWanFps,
   snapWanLength,
   type VideoEngineId,
 } from "./video-engines";
@@ -46,6 +47,7 @@ export { DEFAULT_SDXL_NEGATIVE } from "./defaults";
 export {
   DEFAULT_VIDEO_ENGINE,
   DEFAULT_WAN_UNET,
+  DEFAULT_WAN_UNET_720P,
   DEFAULT_WAN_CLIP,
   DEFAULT_WAN_VAE,
   DEFAULT_WAN_CLIP_VISION,
@@ -53,17 +55,28 @@ export {
   DEFAULT_LTX_CLIP,
   DEFAULT_CODEFORMER,
   WAN_UI_LIMITS,
+  WAN_FPS_OPTIONS,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
   snapWanLength,
+  snapWanFps,
   snapLtxLength,
   maxWanDurationAtFps,
   maxLtxDurationAtFps,
   effectiveDurationSec,
   isChunkedVideoEngine,
+  resolveWanUnet,
   type VideoEngineId,
 } from "./video-engines";
+
+export { DEFAULT_WAN_NEGATIVE } from "./defaults";
+export {
+  WAN_QUALITY_PRESETS,
+  getWanQualityPreset,
+  type WanQualityPreset,
+  type WanQualityPresetId,
+} from "./video-presets";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -329,9 +342,12 @@ export function planWanVideo(body: {
         WAN_UI_LIMITS.maxHeight
       ) / 16
     ) * 16;
-  const fps = Math.min(
-    Math.max(Math.round(body.fps ?? WAN_UI_LIMITS.defaultFps), 1),
-    WAN_UI_LIMITS.maxFps
+  // UI: 16 | 24; requestedFrames = duration × fps → SAFE 81 ⇒ @24/10s ~3 chunki
+  const fps = snapWanFps(
+    Math.min(
+      Math.max(Math.round(body.fps ?? WAN_UI_LIMITS.defaultFps), 1),
+      WAN_UI_LIMITS.maxFps
+    )
   );
   const maxChunkDuration = maxWanDurationAtFps(fps);
   const requested = Math.max(
@@ -343,6 +359,7 @@ export function planWanVideo(body: {
   const chunkPlan = planWanChunks(requestedFrames, fps);
   const frames = chunkPlan.totalUniqueFrames;
   const effective = chunkPlan.effectiveDurationSec;
+  const is720 = width >= 1024 || height >= 640;
 
   return {
     engine: "wan",
@@ -354,9 +371,9 @@ export function planWanVideo(body: {
     frames,
     durationClamped: requested > WAN_UI_LIMITS.maxDurationSec + 0.05,
     maxDurationAtFps: maxChunkDuration,
-    vramRisky: chunkPlan.chunks.some(
-      (c) => c.length > WAN_UI_LIMITS.comfortLength
-    ),
+    vramRisky:
+      chunkPlan.chunks.some((c) => c.length > WAN_UI_LIMITS.comfortLength) ||
+      is720,
     chunkPlan,
   };
 }
@@ -438,7 +455,7 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
   graph["6"].inputs.frame_rate = plan.fps;
 
   if (body.faceRestore) {
-    spliceFaceRestore(graph, "5", "6");
+    spliceFaceRestore(graph, "5", "6", body.faceRestoreFidelity);
   }
 
   return graph;
@@ -464,10 +481,11 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
         ? plan.chunkPlan.chunks[0]!.length
         : snapWanLength(plan.frames);
 
-  const unet =
-    body.model?.trim() && body.model.toLowerCase().includes("wan")
-      ? body.model.trim()
-      : DEFAULT_WAN_UNET;
+  const unet = resolveWanUnet({
+    model: body.model,
+    width: plan.width,
+    height: plan.height,
+  });
 
   const chunkIdx = body.ltxChunkIndex ?? 0;
   const prefix = `studio/video-wan-c${chunkIdx}`;
@@ -481,10 +499,9 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
   graph["52"].inputs.image = imageBasename(body.startImage);
   graph["6"].inputs.text =
     body.prompt?.trim() ||
-    "best quality, photorealistic motion, detailed, cinematic";
+    "best quality, photorealistic motion, detailed, cinematic, static camera, medium shot";
   graph["7"].inputs.text =
-    body.negativePrompt?.trim() ||
-    "low quality, worst quality, deformed, static, blurry, subtitles, watermark, bad anatomy, motionless";
+    body.negativePrompt?.trim() || DEFAULT_WAN_NEGATIVE;
   graph["50"].inputs.width = plan.width;
   graph["50"].inputs.height = plan.height;
   graph["50"].inputs.length = chunkLength;
@@ -496,7 +513,7 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
   let imageSourceForTail: string = "8";
   if (body.faceRestore) {
-    spliceFaceRestore(graph, "8", "21");
+    spliceFaceRestore(graph, "8", "21", body.faceRestoreFidelity);
     imageSourceForTail = "91";
   }
 
@@ -573,7 +590,7 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
   let imageSourceForTail: string = "20";
   if (body.faceRestore) {
-    spliceFaceRestore(graph, "20", "21");
+    spliceFaceRestore(graph, "20", "21", body.faceRestoreFidelity);
     imageSourceForTail = "91";
   }
 
@@ -606,8 +623,13 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
 function spliceFaceRestore(
   graph: WorkflowGraph,
   decodeNodeId: string,
-  combineNodeId: string
+  combineNodeId: string,
+  fidelity?: number
 ): void {
+  const codeformerFidelity =
+    typeof fidelity === "number" && Number.isFinite(fidelity)
+      ? Math.min(1, Math.max(0, fidelity))
+      : 0.5;
   graph["90"] = {
     class_type: "FaceRestoreModelLoader",
     inputs: {
@@ -620,7 +642,7 @@ function spliceFaceRestore(
       facerestore_model: ["90", 0],
       image: [decodeNodeId, 0],
       facedetection: "retinaface_resnet50",
-      codeformer_fidelity: 0.5,
+      codeformer_fidelity: codeformerFidelity,
     },
   };
   if (graph[combineNodeId]) {

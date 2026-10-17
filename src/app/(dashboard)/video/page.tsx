@@ -50,13 +50,14 @@ export default async function StudioVideoPage() {
         <p className="max-w-2xl text-stone-400">
           Domyślnie{" "}
           <strong className="font-medium text-stone-300">Wan 2.1 I2V</strong>{" "}
-          — fotoreal, wolniej, offload (FP8 + Dynamic VRAM). LTX = szybszy draft;
-          SVD = legacy. Chunki + face restore jak wcześniej.
+          — fotoreal, wolniej, offload (FP8). Presety Fast / Smooth 24 / Quality
+          720p / Quality 24 native. FPS 16|24 · chunki SAFE 81 · opcjonalnie RIFE /
+          upscale po stitch.
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}
               Brak Wan w <code className="text-amber-100/90">diffusion_models</code>{" "}
-              — pobierz z zakładki Modele (FP8 480p) albo użyj LTX.
+              — pobierz z zakładki Modele (FP8 480p/720p) albo użyj LTX.
             </span>
           ) : null}
           {hasWan && !hasLtx ? (
@@ -80,7 +81,7 @@ export default async function StudioVideoPage() {
           ...checkpoints,
         ]}
         kind="video"
-        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ ${WAN_UI_LIMITS.maxFps} FPS · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s`}
+        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s`}
       />
     </div>
   );

@@ -1,8 +1,14 @@
 /**
- * PL → EN + lekki boost pod SDXL / SVD.
+ * PL → EN + lekki boost pod SDXL / SVD / Wan.
  * Bez płatnego klucza: MyMemory (public). Opcjonalnie LibreTranslate (self-host)
  * lub OpenAI, gdy jest OPENAI_API_KEY. Translate fail → oryginał + warning.
+ * Wideo: guard static camera / medium shot + negatyw (hands / zoom / shake).
  */
+
+import {
+  DEFAULT_WAN_NEGATIVE,
+  VIDEO_CAMERA_GUARD,
+} from "./defaults";
 
 export type PromptBoostKind = "image" | "video";
 
@@ -81,10 +87,13 @@ const IMAGE_QUALITY_SUFFIX =
   "photorealistic, natural lighting, sharp focus, detailed skin texture, cinematic composition";
 
 const VIDEO_QUALITY_SUFFIX =
-  "smooth natural motion, cinematic camera, photorealistic";
+  "smooth natural motion, photorealistic";
 
 const ALREADY_HAS_QUALITY =
   /\b(photorealistic|photo[\s-]?realistic|8k|raw photo|sharp focus|cinematic)\b/i;
+
+const HAS_CAMERA_GUARD =
+  /\b(static camera|locked.?off|fixed camera|medium shot|medium close.?up)\b/i;
 
 export function looksPolish(text: string): boolean {
   const trimmed = text.trim();
@@ -316,6 +325,36 @@ function appendQualityBoost(
   return { text: `${base}, ${suffix}`, boosted: true };
 }
 
+/** Dopisz static camera + medium shot, jeśli brak w prompcie. */
+function appendVideoCameraGuard(prompt: string): {
+  text: string;
+  guarded: boolean;
+} {
+  const base = prompt.trim().replace(/,+\s*$/, "");
+  if (!base) return { text: "", guarded: false };
+  if (HAS_CAMERA_GUARD.test(base)) {
+    return { text: base, guarded: false };
+  }
+  return { text: `${base}, ${VIDEO_CAMERA_GUARD}`, guarded: true };
+}
+
+/** Scal negatyw usera z DEFAULT_WAN_NEGATIVE (bez duplikatów tokenów). */
+export function mergeWanNegative(userNegative: string): string {
+  const user = userNegative.trim();
+  if (!user) return DEFAULT_WAN_NEGATIVE;
+  const seen = new Set(
+    user
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const extras = DEFAULT_WAN_NEGATIVE.split(",")
+    .map((t) => t.trim())
+    .filter((t) => t && !seen.has(t.toLowerCase()));
+  if (extras.length === 0) return user;
+  return `${user}, ${extras.join(", ")}`;
+}
+
 export type PreparePromptInput = {
   prompt: string;
   negativePrompt?: string;
@@ -356,6 +395,11 @@ export async function preparePromptForModel(
   const { text: boostedPrompt, boosted } = appendQualityBoost(modelPrompt, kind);
   modelPrompt = boostedPrompt;
 
+  if (kind === "video") {
+    const guarded = appendVideoCameraGuard(modelPrompt);
+    modelPrompt = guarded.text;
+  }
+
   let modelNegative = originalNegative.trim();
   let negativeTranslated = false;
   if (modelNegative && (looksPolish(modelNegative) || force)) {
@@ -371,6 +415,10 @@ export async function preparePromptForModel(
         provider = negOut.provider;
       }
     }
+  }
+
+  if (kind === "video") {
+    modelNegative = mergeWanNegative(modelNegative);
   }
 
   return {

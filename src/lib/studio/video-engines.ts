@@ -7,9 +7,16 @@ export const DEFAULT_VIDEO_ENGINE: VideoEngineId = "wan";
 /** Wan 2.1 I2V 480p FP8 — Comfy-Org (16 GB + Dynamic VRAM / offload). */
 export const DEFAULT_WAN_UNET = "wan2.1_i2v_480p_14B_fp8_e4m3fn.safetensors";
 export const FALLBACK_WAN_UNET_FP16 = "wan2.1_i2v_480p_14B_fp16.safetensors";
+/** Wan 2.1 I2V 720p FP8 — Legion filename (Comfy-Org scaled). */
+export const DEFAULT_WAN_UNET_720P =
+  "wan2.1_i2v_720p_14B_fp8_scaled.safetensors";
 export const DEFAULT_WAN_CLIP = "umt5_xxl_fp8_e4m3fn_scaled.safetensors";
 export const DEFAULT_WAN_VAE = "wan_2.1_vae.safetensors";
 export const DEFAULT_WAN_CLIP_VISION = "clip_vision_h.safetensors";
+
+/** Dozwolone FPS Wan w UI (native 16 | 24; Smooth = gen 16 + RIFE). */
+export const WAN_FPS_OPTIONS = [16, 24] as const;
+export type WanFpsOption = (typeof WAN_FPS_OPTIONS)[number];
 
 export const DEFAULT_LTX_CHECKPOINT = "ltx-video-2b-v0.9.5.safetensors";
 export const FALLBACK_LTX_CHECKPOINT = "ltx-video-2b-v0.9.safetensors";
@@ -43,15 +50,15 @@ export const VIDEO_ENGINE_OPTIONS: Array<{
 
 /**
  * Wan 2.1 I2V — length 4n+1 (WanImageToVideo step 4).
- * SAFE maxLength=81 @ 832×480 FP8 — provisional do potwierdzenia Legionem.
- * Dłuższe: planWanChunks (overlap 1 + ffmpeg stitch).
+ * SAFE maxLength=81 (480p i 720p FP8) — dłuższe: planWanChunks.
+ * FPS 16 | 24; @24fps/10s ≈ 3 chunki (requestedFrames = duration×fps).
  */
 export const WAN_UI_LIMITS = {
-  maxWidth: 832,
-  maxHeight: 480,
-  maxFps: 16,
+  maxWidth: 1280,
+  maxHeight: 720,
+  maxFps: 24,
   minLength: 17,
-  /** Max klatek na jeden prompt Wan (provisional SAFE @ 480p FP8 + offload) */
+  /** Max klatek na jeden prompt Wan (SAFE 4n+1 @ FP8 + offload) */
   maxLength: 81,
   comfortLength: 33,
   comfortDurationSec: 2,
@@ -60,9 +67,31 @@ export const WAN_UI_LIMITS = {
   defaultFps: 16,
   defaultWidth: 832,
   defaultHeight: 480,
+  qualityWidth: 1280,
+  qualityHeight: 720,
   maxDurationSec: 60,
-  note: "Wan: fotoreal / wolniej / offload (FP8 + Dynamic VRAM na 16 GB). 1 chunk ≤81 klatek (4n+1 @ 16 FPS). Powyżej — auto chunki (overlap 1) + stitch. SAFE do potwierdzenia Legionem.",
+  note: "Wan: fotoreal / wolniej / offload (FP8). FPS 16|24. 1 chunk ≤81 klatek (4n+1). @24fps/10s ≈3 chunki. Smooth 24 = gen 16 + RIFE. 720p = Quality preset.",
 } as const;
+
+/** Wybierz UNET 480p vs 720p po nazwie / rozdzielczości. */
+export function resolveWanUnet(options: {
+  model?: string;
+  width?: number;
+  height?: number;
+}): string {
+  const m = options.model?.trim();
+  if (m && m.toLowerCase().includes("wan")) return m;
+  const w = options.width ?? WAN_UI_LIMITS.defaultWidth;
+  const h = options.height ?? WAN_UI_LIMITS.defaultHeight;
+  if (w >= 1024 || h >= 640) return DEFAULT_WAN_UNET_720P;
+  return DEFAULT_WAN_UNET;
+}
+
+export function snapWanFps(fps: number): WanFpsOption {
+  const n = Math.round(fps);
+  if (n >= 20) return 24;
+  return 16;
+}
 
 /**
  * Limity LTXV length (8n+1). Legion SAFE maxLength=121 @ 768×512.

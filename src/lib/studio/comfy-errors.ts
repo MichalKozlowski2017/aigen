@@ -81,6 +81,20 @@ function looksLikeLtxMissing(blob: string): boolean {
   );
 }
 
+function looksLikeRifeMissing(blob: string): boolean {
+  return (
+    /RIFE VFI|Frame.Interpolation|rife\d+\.pth/i.test(blob) &&
+    /missing_node_type|not found|No module|Value not in list/i.test(blob)
+  );
+}
+
+function looksLikeUpscaleMissing(blob: string): boolean {
+  return (
+    /UpscaleModelLoader|ImageUpscaleWithModel|RealESRGAN/i.test(blob) &&
+    /missing_node_type|not found|No module|Value not in list/i.test(blob)
+  );
+}
+
 /** Wyciąga czytelne linie z node_errors Comfy. */
 export function summarizeNodeErrors(nodeErrors: unknown): string {
   if (!nodeErrors || typeof nodeErrors !== "object") return "";
@@ -167,6 +181,24 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
       code: "missing_ltx_nodes",
       message: "Brak node’ów LTXV w ComfyUI (zaktualizuj Comfy do wersji z LTXV).",
       hint: "LTXVImgToVideo / LTXVScheduler są wbudowane w nowsze ComfyUI. Zaktualizuj Comfy albo wybierz silnik SVD (draft).",
+    });
+  }
+
+  if (looksLikeRifeMissing(blob)) {
+    return wrap({
+      code: "missing_rife",
+      message: "Brak RIFE (ComfyUI-Frame-Interpolation) na ComfyUI.",
+      hint: "Zainstaluj ComfyUI-Frame-Interpolation + wagi rife47.pth, albo wyłącz Smooth 24 / postRife — pipeline i tak zwróci stitch @16 fps.",
+      linkHref: "https://github.com/Fannovel16/ComfyUI-Frame-Interpolation",
+      linkLabel: "ComfyUI-Frame-Interpolation (GitHub)",
+    });
+  }
+
+  if (looksLikeUpscaleMissing(blob)) {
+    return wrap({
+      code: "missing_upscale",
+      message: "Brak modelu / node’ów upscale (RealESRGAN) na ComfyUI.",
+      hint: "Zainstaluj UpscaleModelLoader + RealESRGAN_x2plus.pth, albo wyłącz postUpscale.",
     });
   }
 

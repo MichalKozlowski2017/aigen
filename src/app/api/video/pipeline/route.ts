@@ -70,7 +70,8 @@ export async function POST(request: Request) {
   }
 
   const previewPlan = planVideo(parsed.data);
-  if (!previewPlan.chunkPlan?.chunked) {
+  const needsPost = Boolean(parsed.data.postRife || parsed.data.postUpscale);
+  if (!previewPlan.chunkPlan?.chunked && !needsPost) {
     return NextResponse.json(
       {
         ok: false,
