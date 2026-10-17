@@ -39,7 +39,10 @@ export {
 } from "./video-engines";
 export { DEFAULT_WAN_NEGATIVE, VIDEO_CAMERA_GUARD } from "./defaults";
 export {
+  DEFAULT_WAN_QUALITY_PRESET,
+  DEFAULT_WAN_FAST_STEPS,
   WAN_QUALITY_PRESETS,
+  WAN_QUALITY_PRESETS_UI,
   getWanQualityPreset,
 } from "./video-presets";
 export { runVideoPostProcess } from "./video-postprocess";

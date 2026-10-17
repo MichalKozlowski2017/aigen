@@ -72,7 +72,10 @@ export {
 
 export { DEFAULT_WAN_NEGATIVE } from "./defaults";
 export {
+  DEFAULT_WAN_QUALITY_PRESET,
+  DEFAULT_WAN_FAST_STEPS,
   WAN_QUALITY_PRESETS,
+  WAN_QUALITY_PRESETS_UI,
   getWanQualityPreset,
   type WanQualityPreset,
   type WanQualityPresetId,
@@ -506,7 +509,8 @@ function buildWanVideoWorkflow(body: GenerateBody): WorkflowGraph {
   graph["50"].inputs.height = plan.height;
   graph["50"].inputs.length = chunkLength;
   graph["3"].inputs.seed = seed;
-  graph["3"].inputs.steps = body.steps ?? 20;
+  // Fast 480p default ~10; Quality presety podają 16–20 z body
+  graph["3"].inputs.steps = body.steps ?? 10;
   graph["3"].inputs.cfg = body.cfg ?? 6;
   graph["21"].inputs.frame_rate = plan.fps;
   graph["21"].inputs.filename_prefix = prefix;
