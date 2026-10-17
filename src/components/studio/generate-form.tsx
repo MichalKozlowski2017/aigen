@@ -19,8 +19,11 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  DEFAULT_WAN_FAST_STEPS,
+  DEFAULT_WAN_QUALITY_PRESET,
   WAN_FPS_OPTIONS,
   WAN_QUALITY_PRESETS,
+  WAN_QUALITY_PRESETS_UI,
   WAN_UI_LIMITS,
   isChunkedVideoEngine,
   planLtxVideo,
@@ -92,9 +95,11 @@ export function GenerateForm({
   );
   const [faceRestore, setFaceRestore] = useState(false);
   const [faceRestoreFidelity, setFaceRestoreFidelity] = useState(0.5);
-  const [qualityPreset, setQualityPreset] =
-    useState<WanQualityPresetId>("fast-480p");
-  const [steps, setSteps] = useState<number>(12);
+  const [qualityPreset, setQualityPreset] = useState<WanQualityPresetId>(
+    DEFAULT_WAN_QUALITY_PRESET
+  );
+  const [steps, setSteps] = useState<number>(DEFAULT_WAN_FAST_STEPS);
+  /** Smooth 24: opcjonalny RIFE po stitch — nie jest domyślny ani mandatory. */
   const [postRife, setPostRife] = useState(false);
   const [postUpscale, setPostUpscale] = useState(false);
   const videoLimits =
@@ -214,9 +219,13 @@ export function GenerateForm({
   }
 
   function applyWanPreset(id: WanQualityPresetId) {
-    const preset = WAN_QUALITY_PRESETS.find((p) => p.id === id);
+    // smooth-24 → Fast + RIFE toggle (Smooth nie jest osobnym presetem UI)
+    const resolved: WanQualityPresetId =
+      id === "smooth-24" ? DEFAULT_WAN_QUALITY_PRESET : id;
+    const preset = WAN_QUALITY_PRESETS.find((p) => p.id === resolved);
     if (!preset) return;
-    setQualityPreset(id);
+    const keepRife = id === "smooth-24" || (resolved === "fast-480p" && postRife);
+    setQualityPreset(resolved);
     setVideoEngine("wan");
     setWidth(preset.width);
     setHeight(preset.height);
@@ -224,8 +233,9 @@ export function GenerateForm({
     setSteps(preset.steps);
     setFaceRestore(preset.faceRestore);
     setFaceRestoreFidelity(preset.faceRestoreFidelity);
-    setPostRife(preset.postRife);
-    setPostUpscale(preset.postUpscale);
+    // Quality* wyłącza RIFE; Fast zachowuje opcjonalny toggle
+    setPostRife(id === "smooth-24" ? true : resolved === "fast-480p" ? keepRife : false);
+    setPostUpscale(false);
     setModel(pickWanModel(preset.width >= 1024 || preset.id === "quality-720p"));
     if (!negativePrompt.trim()) {
       setNegativePrompt(DEFAULT_WAN_NEGATIVE);
@@ -235,7 +245,8 @@ export function GenerateForm({
   function applyVideoEngine(next: VideoEngineId) {
     setVideoEngine(next);
     if (next === "wan") {
-      applyWanPreset(qualityPreset);
+      applyWanPreset(DEFAULT_WAN_QUALITY_PRESET);
+      setPostRife(false);
     } else if (next === "ltx") {
       setWidth(LTX_UI_LIMITS.defaultWidth);
       setHeight(LTX_UI_LIMITS.defaultHeight);
@@ -900,9 +911,10 @@ export function GenerateForm({
                     fotoreal / wolniej / offload
                   </span>
                   {" — "}
-                  Wan 2.1 I2V FP8 (480p/720p) · FPS 16|24 · SAFE ≤
-                  {WAN_UI_LIMITS.maxLength} klatek/chunk. @24 fps / 10 s ≈ 3
-                  chunki. Smooth 24 = gen 16 + RIFE (Comfy, graceful).
+                  Domyślnie <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
+                  (832×480 · 16 fps · steps ~{DEFAULT_WAN_FAST_STEPS}). Quality
+                  720p zostaje opcjonalnie — wolne na 16 GB. Smooth 24 = toggle
+                  RIFE poniżej (nie mandatory).
                 </p>
               ) : null}
             </fieldset>
@@ -913,7 +925,7 @@ export function GenerateForm({
                   Preset jakości
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {WAN_QUALITY_PRESETS.map((p) => (
+                  {WAN_QUALITY_PRESETS_UI.map((p) => (
                     <button
                       key={p.id}
                       type="button"
@@ -969,16 +981,25 @@ export function GenerateForm({
                     checked={postRife}
                     onChange={(e) => {
                       setPostRife(e.target.checked);
-                      if (e.target.checked) setQualityPreset("smooth-24");
+                      // Smooth 24 = Fast + RIFE; nie przełączaj na osobny preset
+                      if (
+                        e.target.checked &&
+                        (qualityPreset === "quality-720p" ||
+                          qualityPreset === "quality-24-native")
+                      ) {
+                        applyWanPreset(DEFAULT_WAN_QUALITY_PRESET);
+                        setPostRife(true);
+                      }
                     }}
                     className="mt-0.5"
                   />
                   <span>
                     <span className="block text-sm text-stone-200">
-                      Post RIFE → 24 fps
+                      Smooth 24 (RIFE) — opcjonalnie
                     </span>
                     <span className="block text-[11px] text-stone-500">
-                      Po stitch. Graceful gdy brak node’a na Legionie.
+                      Gen @16 → RIFE 24 po stitch. Wyłączone domyślnie; graceful
+                      gdy brak node’a.
                     </span>
                   </span>
                 </label>
