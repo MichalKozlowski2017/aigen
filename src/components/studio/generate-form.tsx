@@ -454,6 +454,10 @@ export function GenerateForm({
       // ignore
     }
 
+    /** 404 / miss po cold start — nie hard-error na pierwszej odpowiedzi. */
+    const PIPELINE_MISS_MAX = 10;
+    let consecutiveMisses = 0;
+
     const tick = async () => {
       if (cancelled) return;
       setStartedAtMs((prev) => prev ?? started);
@@ -467,36 +471,75 @@ export function GenerateForm({
         const res = await fetch(
           `/api/video/pipeline/${encodeURIComponent(pipelineId)}`
         );
-        const data = await res.json();
+        const data = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          recoverable?: boolean;
+          code?: string;
+          job?: {
+            status: string;
+            outputs?: JobOutput[];
+            progress?: JobProgress;
+            promptId?: string;
+          };
+          chunkInfo?: { index: number; total: number; label: string };
+        };
         if (cancelled) return;
+
+        const isMiss =
+          res.status === 404 ||
+          data.code === "PIPELINE_REHYDRATING" ||
+          (typeof data.error === "string" &&
+            /nie znaleziony|niedostępny|odzysk/i.test(data.error));
+
         if (!data.ok) {
           consecutiveErrors += 1;
-          setPollWarning(
-            data.error ??
-              `Błąd pipeline (próba ${consecutiveErrors}) — ponawiam…`
-          );
+          if (isMiss) {
+            consecutiveMisses += 1;
+            if (consecutiveMisses >= PIPELINE_MISS_MAX) {
+              const msg =
+                "Nie udało się odzyskać pipeline po cold start / redeploy (brak stanu w Comfy). Sprawdź galerię — chunk c0 mógł się dokończyć; ewentualnie uruchom generację ponownie.";
+              setError(msg);
+              setErrorDetail({
+                message: msg,
+                hint: "Stan pipeline jest kopiowany do Comfy input (aigen-pipeline-*.json). Jeśli Comfy był offline przy starcie, odzyskanie nie jest możliwe.",
+              });
+              setPollWarning(null);
+              try {
+                window.localStorage.removeItem(PIPELINE_STORAGE_KEY);
+              } catch {
+                // ignore
+              }
+              return;
+            }
+            setPollWarning(
+              consecutiveMisses === 1
+                ? "Odzyskiwanie stanu pipeline z Comfy (cold start / redeploy)…"
+                : `Odzyskiwanie pipeline… próba ${consecutiveMisses}/${PIPELINE_MISS_MAX}`
+            );
+          } else {
+            setPollWarning(
+              data.error ??
+                `Błąd pipeline (próba ${consecutiveErrors}) — ponawiam…`
+            );
+          }
           window.setTimeout(
             tick,
-            Math.min(15_000, JOB_POLL_INTERVAL_MS * consecutiveErrors)
+            Math.min(15_000, JOB_POLL_INTERVAL_MS * Math.max(1, consecutiveMisses || consecutiveErrors))
           );
           return;
         }
+
         consecutiveErrors = 0;
+        consecutiveMisses = 0;
         setPollWarning(null);
-        const job = data.job as {
-          status: string;
-          outputs?: JobOutput[];
-          progress?: JobProgress;
-          promptId?: string;
-        };
+        const job = data.job!;
         if (job.promptId) setPromptId(job.promptId);
         setStatus(job.status);
         setOutputs(job.outputs ?? []);
         if (job.progress) setJobProgress(job.progress);
         if (data.chunkInfo) {
-          setChunkInfo(
-            data.chunkInfo as { index: number; total: number; label: string }
-          );
+          setChunkInfo(data.chunkInfo);
         } else if (job.status === "completed") {
           setChunkInfo(null);
         }
