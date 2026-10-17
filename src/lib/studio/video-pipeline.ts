@@ -8,6 +8,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  emptyProgress,
   enqueuePrompt,
   fetchComfyViewText,
   getJobStatus,
@@ -15,6 +16,11 @@ import {
   type JobStatus,
   uploadFileToComfy,
 } from "./comfy-client";
+import {
+  engineLabelFromId,
+  formatPolishPhase,
+  percentForStage,
+} from "./comfy-progress";
 import { ensureStartImageInComfyInput } from "./ensure-start-image";
 import type { LtxChunkPlan } from "./ltx-chunks";
 import { preparePromptForModel } from "./prompt-boost";
@@ -135,25 +141,6 @@ function parsePipelineState(
     // ignore
   }
   return null;
-}
-
-function emptyProgress(partial?: Partial<JobProgress>): JobProgress {
-  return {
-    percent: null,
-    phase: "pipeline",
-    queuePending: 0,
-    queueRunning: false,
-    currentNodeId: null,
-    currentNodeType: null,
-    nodesDone: null,
-    nodesTotal: null,
-    executionStartMs: null,
-    errorMessage: null,
-    errorHint: null,
-    errorLinkHref: null,
-    errorLinkLabel: null,
-    ...partial,
-  };
 }
 
 /**
@@ -351,9 +338,19 @@ async function enqueueChunk(
   state.chunkIndex = chunkIndex;
   state.currentPromptId = result.promptId;
   state.status = "running";
+  const engineLabel = engineLabelFromId(state.engine);
+  const displayChunk = chunkIndex + 1;
+  const chunkTotal = state.plan.chunkCount;
   state.progress = emptyProgress({
-    percent: Math.round((chunkIndex / state.plan.chunkCount) * 90),
-    phase: `chunk ${chunkIndex + 1}/${state.plan.chunkCount}`,
+    // Start chunka — niski % w paśmie chunka, nie fake 25 całego joba
+    percent: Math.round((chunkIndex / chunkTotal) * 90 + 1),
+    stage: "loading",
+    phase: formatPolishPhase({
+      stage: "loading",
+      engineLabel,
+      chunkIndex: displayChunk,
+      chunkTotal,
+    }),
     queueRunning: true,
     nodesTotal: result.nodesTotal,
     executionStartMs: Date.now(),
@@ -368,14 +365,34 @@ function mapChunkProgress(
 ): JobProgress {
   const chunkIdx = state.chunkIndex;
   const n = state.plan.chunkCount;
+  const chunkIndex = chunkIdx + 1;
   const base = (chunkIdx / n) * 90;
   const span = 90 / n;
-  const local =
-    typeof job.progress.percent === "number" ? job.progress.percent / 100 : 0.25;
+  const engineLabel = engineLabelFromId(state.engine);
+  const localPct =
+    typeof job.progress.percent === "number" ? job.progress.percent : null;
+  // Bez fake 25%: brak % joba → tylko baza chunka (start etapu) albo null
+  const percent =
+    localPct != null
+      ? Math.min(94, Math.round(base + (localPct / 100) * span))
+      : Math.round(base + span * 0.02);
+
+  const stage = job.progress.stage ?? "running";
   return emptyProgress({
     ...job.progress,
-    percent: Math.min(94, Math.round(base + local * span)),
-    phase: `chunk ${chunkIdx + 1}/${n} · ${job.progress.phase}`,
+    percent,
+    stage,
+    phase: formatPolishPhase({
+      stage,
+      nodeType: job.progress.currentNodeType,
+      step: job.progress.step,
+      stepMax: job.progress.stepMax,
+      engineLabel,
+      chunkIndex,
+      chunkTotal: n,
+      nodesDone: job.progress.nodesDone,
+      nodesTotal: job.progress.nodesTotal,
+    }),
   });
 }
 
@@ -442,7 +459,8 @@ async function advancePipelineUnlocked(
             : `Nie udało się uruchomić chunka ${state.chunkIndex + 1}`;
         state.progress = emptyProgress({
           percent: 100,
-          phase: "błąd",
+          stage: "fail",
+          phase: formatPolishPhase({ stage: "fail" }),
           errorMessage: state.error,
         });
         state.advancingUntil = undefined;
@@ -455,7 +473,8 @@ async function advancePipelineUnlocked(
     state.error = "Pipeline bez aktywnego prompt_id";
     state.progress = emptyProgress({
       percent: 100,
-      phase: "błąd",
+      stage: "fail",
+      phase: formatPolishPhase({ stage: "fail" }),
       errorMessage: state.error,
     });
     await persist(state);
@@ -469,7 +488,8 @@ async function advancePipelineUnlocked(
     // Transient — nie zabijaj pipeline; UI zobaczy „oczekiwanie”
     state.progress = emptyProgress({
       ...state.progress,
-      phase: state.progress.phase || "oczekiwanie na Comfy…",
+      stage: state.progress.stage ?? "unknown",
+      phase: state.progress.phase || formatPolishPhase({ stage: "unknown" }),
       errorMessage: null,
       errorHint:
         err instanceof Error
@@ -497,7 +517,8 @@ async function advancePipelineUnlocked(
       job.progress.errorMessage ?? `Chunk ${state.chunkIndex} nieudany`;
     state.progress = emptyProgress({
       percent: 100,
-      phase: "błąd",
+      stage: "fail",
+      phase: formatPolishPhase({ stage: "fail" }),
       errorMessage: state.error,
       errorHint: job.progress.errorHint,
       errorLinkHref: job.progress.errorLinkHref,
@@ -517,7 +538,8 @@ async function advancePipelineUnlocked(
     state.error = `Chunk ${state.chunkIndex} bez pliku mp4 w outputach`;
     state.progress = emptyProgress({
       percent: 100,
-      phase: "błąd",
+      stage: "fail",
+      phase: formatPolishPhase({ stage: "fail" }),
       errorMessage: state.error,
     });
     state.advancingUntil = undefined;
@@ -547,7 +569,8 @@ async function advancePipelineUnlocked(
         "Brak klatki końcowej (wan-tail/ltx-tail) — nie można kontynuować chunków";
       state.progress = emptyProgress({
         percent: 100,
-        phase: "błąd",
+        stage: "fail",
+        phase: formatPolishPhase({ stage: "fail" }),
         errorMessage: state.error,
       });
       state.advancingUntil = undefined;
@@ -572,7 +595,8 @@ async function advancePipelineUnlocked(
           : `Nie udało się uruchomić chunka ${nextIdx}`;
       state.progress = emptyProgress({
         percent: 100,
-        phase: "błąd",
+        stage: "fail",
+        phase: formatPolishPhase({ stage: "fail" }),
         errorMessage: state.error,
       });
       state.advancingUntil = undefined;
@@ -591,8 +615,9 @@ async function finishStitch(
   state.currentPromptId = null;
   state.advancingUntil = Date.now() + 180_000;
   state.progress = emptyProgress({
-    percent: 92,
-    phase: "ffmpeg stitch",
+    percent: percentForStage({ stage: "stitch" }) ?? 92,
+    stage: "stitch",
+    phase: formatPolishPhase({ stage: "stitch" }),
   });
   await persist(state);
 
@@ -624,9 +649,11 @@ async function finishStitch(
     const wantUpscale = Boolean(state.body.postUpscale);
 
     if (wantRife || wantUpscale) {
+      const postStage = wantRife ? "rife" : "upscale";
       state.progress = emptyProgress({
-        percent: 96,
-        phase: wantRife ? "RIFE 16→24…" : "upscale…",
+        percent: percentForStage({ stage: postStage }) ?? 96,
+        stage: postStage,
+        phase: formatPolishPhase({ stage: postStage }),
       });
       state.advancingUntil = Date.now() + 600_000;
       await persist(state);
@@ -664,6 +691,7 @@ async function finishStitch(
           : "gotowe (stitched)";
     state.progress = emptyProgress({
       percent: 100,
+      stage: "done",
       phase: postNote,
     });
     state.advancingUntil = undefined;
@@ -673,7 +701,8 @@ async function finishStitch(
     state.error = err instanceof Error ? err.message : "Stitch nieudany";
     state.progress = emptyProgress({
       percent: 100,
-      phase: "błąd",
+      stage: "fail",
+      phase: formatPolishPhase({ stage: "fail" }),
       errorMessage: state.error,
     });
     state.advancingUntil = undefined;
@@ -759,7 +788,14 @@ export async function startVideoPipeline(
     error: null,
     progress: emptyProgress({
       percent: 2,
-      phase: `chunk 1/${plan.chunkCount}`,
+      stage: "queued",
+      phase: formatPolishPhase({
+        stage: "queued",
+        engineLabel: engineLabelFromId(engine),
+        chunkIndex: 1,
+        chunkTotal: plan.chunkCount,
+        queueAhead: 0,
+      }),
       executionStartMs: Date.now(),
     }),
     modelPrompt: boost.modelPrompt,
@@ -832,12 +868,22 @@ export function pipelineToJobView(state: VideoPipelineState): {
               ? "failed"
               : "unknown";
 
+  const engineLabel = engineLabelFromId(state.engine);
   const chunkLabel =
     state.status === "stitching"
-      ? `sklejanie ${state.clips.length} odcinków…`
+      ? formatPolishPhase({ stage: "stitch" })
       : state.status === "completed"
         ? null
-        : `chunk ${state.chunkIndex + 1}/${state.plan.chunkCount}`;
+        : state.progress.phase ||
+          formatPolishPhase({
+            stage: state.progress.stage ?? "running",
+            engineLabel,
+            chunkIndex: state.chunkIndex + 1,
+            chunkTotal: state.plan.chunkCount,
+            step: state.progress.step,
+            stepMax: state.progress.stepMax,
+            nodeType: state.progress.currentNodeType,
+          });
 
   return {
     promptId: state.currentPromptId ?? state.id,

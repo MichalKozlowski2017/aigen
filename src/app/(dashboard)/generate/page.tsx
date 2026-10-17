@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { GenerateForm } from "@/components/studio/generate-form";
-import { getDefaultCheckpoint, getDefaultImageModel } from "@/lib/studio/config";
+import {
+  getDefaultCheckpoint,
+  getDefaultImageModel,
+  getStudioPublicConfig,
+} from "@/lib/studio/config";
 import { FLUX_UI_NOTE, buildImageModelOptions } from "@/lib/studio/flux";
 import { listInstalledCheckpoints } from "@/lib/studio/models";
 
@@ -11,6 +15,7 @@ export default async function StudioGeneratePage() {
   const sdxlDefault = getDefaultCheckpoint();
   const defaultModel = getDefaultImageModel();
   const imageModels = buildImageModelOptions(sdxlDefault, checkpoints);
+  const { comfyUrl } = getStudioPublicConfig();
 
   return (
     <div className="space-y-8">
@@ -41,6 +46,7 @@ export default async function StudioGeneratePage() {
         imageModels={imageModels}
         kind="image"
         imageLimitsNote={FLUX_UI_NOTE}
+        comfyUrl={comfyUrl}
       />
     </div>
   );
