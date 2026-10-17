@@ -8,6 +8,7 @@ export * from "./comfy-errors";
 export * from "./flux";
 export * from "./workflow-builder";
 export * from "./gallery";
+export * from "./gallery-index";
 export * from "./models";
 export * from "./downloads";
 export * from "./prompt-boost";

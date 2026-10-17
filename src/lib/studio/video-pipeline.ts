@@ -22,6 +22,7 @@ import {
   percentForStage,
 } from "./comfy-progress";
 import { ensureStartImageInComfyInput } from "./ensure-start-image";
+import { recordGalleryOutputs } from "./gallery-index";
 import type { LtxChunkPlan } from "./ltx-chunks";
 import { preparePromptForModel } from "./prompt-boost";
 import type { GenerateBody } from "./schemas";
@@ -702,6 +703,13 @@ async function finishStitch(
     });
     state.advancingUntil = undefined;
     await persist(state);
+    void recordGalleryOutputs(
+      state.outputs.map((o) => ({
+        filename: o.filename,
+        subfolder: o.subfolder,
+        type: o.type || "output",
+      }))
+    );
   } catch (err) {
     state.status = "failed";
     state.error = err instanceof Error ? err.message : "Stitch nieudany";

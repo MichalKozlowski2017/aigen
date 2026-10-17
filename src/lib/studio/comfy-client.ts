@@ -627,6 +627,34 @@ export async function listComfyModelFolder(
   return names;
 }
 
+/**
+ * Lista plików w katalogu Comfy (GET /internal/files/{output|input|temp}).
+ * Stock API frontendu Comfy — tylko pliki w root katalogu (bez podfolderów typu studio/).
+ * Odpowiedź: `["name.ext [output]", ...]`.
+ */
+export async function listComfyInternalFiles(
+  directoryType: "output" | "input" | "temp"
+): Promise<Array<{ filename: string; type: string }>> {
+  const res = await fetchComfy(`/internal/files/${directoryType}`, {
+    timeoutMs: 10_000,
+  });
+  if (!res.ok) {
+    throw new Error(`Comfy /internal/files/${directoryType} HTTP ${res.status}`);
+  }
+  const data = (await res.json()) as unknown;
+  if (!Array.isArray(data)) return [];
+  const out: Array<{ filename: string; type: string }> = [];
+  for (const item of data) {
+    if (typeof item !== "string") continue;
+    const m = item.match(/^(.*) \[([^\]]+)\]\s*$/);
+    const filename = (m ? m[1] : item).trim();
+    const type = (m ? m[2] : directoryType).trim() || directoryType;
+    if (!filename || filename.startsWith("_")) continue;
+    out.push({ filename, type });
+  }
+  return out;
+}
+
 /** Lista dostępnych typów folderów modeli (GET /models). */
 export async function listComfyModelFolders(): Promise<string[]> {
   const res = await fetchComfy("/models", { timeoutMs: 8_000 });
