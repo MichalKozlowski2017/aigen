@@ -36,6 +36,16 @@ export function getStudioPassword(): string | null {
   return trimOrUndefined(process.env.STUDIO_PASSWORD) ?? null;
 }
 
+/**
+ * true = Legion queue worker jest source of truth dla chunków.
+ * Panel Vercel: GET tylko status (bez advance / bez after() kick).
+ * Ustaw `PIPELINE_LEGION_WORKER=1` na Vercel gdy worker na Legionie orkiestruje.
+ */
+export function isPipelineLegionWorker(): boolean {
+  const v = trimOrUndefined(process.env.PIPELINE_LEGION_WORKER)?.toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
 export function getDefaultCheckpoint(): string {
   return (
     trimOrUndefined(process.env.STUDIO_DEFAULT_CHECKPOINT) ?? DEFAULT_CHECKPOINT

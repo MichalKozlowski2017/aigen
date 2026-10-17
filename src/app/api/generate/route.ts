@@ -79,8 +79,13 @@ export async function POST(request: Request) {
     const videoPlan =
       parsed.data.kind === "video" ? planVideo(bodyForComfy) : null;
 
-    const { workflow, template, engine } = buildWorkflow(bodyForComfy);
+    const { workflow, template, engine, warnings: wfWarnings } =
+      await buildWorkflow(bodyForComfy);
     const result = await enqueuePrompt(workflow);
+    const boostWarnings = [
+      ...boost.warnings,
+      ...(wfWarnings ?? []),
+    ];
     return NextResponse.json({
       ok: true,
       promptId: result.promptId,
@@ -113,7 +118,7 @@ export async function POST(request: Request) {
         boosted: boost.boosted,
         detectedPolish: boost.detectedPolish,
         provider: boost.provider,
-        warnings: boost.warnings,
+        warnings: boostWarnings,
       },
     });
   } catch (err) {

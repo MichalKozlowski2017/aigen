@@ -45,4 +45,9 @@ export {
   WAN_QUALITY_PRESETS_UI,
   getWanQualityPreset,
 } from "./video-presets";
+export {
+  WAN_DISTILL_LORA_FILENAME,
+  resolveWanDistillLora,
+  wantsWanDistill,
+} from "./wan-distill";
 export { runVideoPostProcess } from "./video-postprocess";

@@ -53,6 +53,7 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel galeria = historia Comfy |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |
+| `PIPELINE_LEGION_WORKER` | `1` = Legion worker orkiestruje chunki; panel GET tylko status |
 
 ## Skrypty
 
@@ -66,7 +67,7 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 ## RTX 5080 — praktyczne limity (~16 GB VRAM)
 
 - **Obraz (Flux.2 Dev fp8):** domyślnie; SDXL opcjonalnie w dropdownie
-- **Wideo (Wan I2V):** Fast 480p (domyślnie) + opcjonalny Smooth 24 (RIFE); patrz `docs/studio-setup.md`
+- **Wideo (Wan I2V):** Fast 480p + lightx2v distill LoRA (domyślnie) + opcjonalny Smooth 24 (RIFE); patrz `docs/studio-setup.md`
 
 Nie commituj plików `.safetensors` / `.ckpt`.
 

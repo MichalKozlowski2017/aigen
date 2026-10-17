@@ -207,5 +207,16 @@
     "sizeHint": "~23 MB",
     "notes": "Oficjalny przykład LoRA od Stability — nie podpięty w domyślnym workflow; do ręcznego użycia w ComfyUI.",
     "vramHintGb": 1
+  },
+  {
+    "id": "wan-lightx2v-i2v-distill-lora",
+    "name": "Wan lightx2v I2V 14B 480p distill LoRA",
+    "type": "lora",
+    "filename": "lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+    "targetSubdir": "loras",
+    "downloadUrl": "https://huggingface.co/Kijai/WanVideo_comfy/resolve/main/Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors",
+    "sizeHint": "~738 MB",
+    "notes": "Fast 480p: LoraLoaderModelOnly + steps 4 + CFG 1 + euler. Graceful jeśli brak na Comfy (fallback steps ~10). Nazwa zsynchronizowana z Legion queue.",
+    "vramHintGb": 1
   }
 ]

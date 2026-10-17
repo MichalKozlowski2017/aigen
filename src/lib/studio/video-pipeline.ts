@@ -331,7 +331,13 @@ async function enqueueChunk(
     ltxChunkIndex: chunkIndex,
   };
 
-  const { workflow } = buildWorkflow(body);
+  const { workflow, warnings: wfWarnings } = await buildWorkflow(body);
+  if (wfWarnings?.length) {
+    state.promptBoostWarnings = [
+      ...(state.promptBoostWarnings ?? []),
+      ...wfWarnings,
+    ];
+  }
   const result = await enqueuePrompt(workflow, `aigen-pipe-${state.id}`);
 
   state.cursorStart = ensured.startImage;
@@ -819,14 +825,33 @@ export async function startVideoPipeline(
   };
 }
 
+/** Ostatni kick after() — unikaj multiplikacji pętli na każde poll GET. */
+const recentBgKicks = new Map<string, number>();
+
+/**
+ * true gdy wolno odpalić after() kick (min. odstęp między kickami).
+ * Legion worker (`PIPELINE_LEGION_WORKER=1`) — panel nie kickuje.
+ */
+export function shouldKickPipelineBackground(
+  id: string,
+  minIntervalMs = 45_000
+): boolean {
+  const last = recentBgKicks.get(id) ?? 0;
+  return Date.now() - last >= minIntervalMs;
+}
+
 /**
  * Długi tick w tle (po odpowiedzi HTTP) — kontynuuje c1/stitch gdy UI padnie.
  * Budżet czasowy: platforma (Vercel maxDuration) i tak ucięcie; poll i tak dociąga.
+ *
+ * Legion worker jest source of truth gdy `PIPELINE_LEGION_WORKER=1` —
+ * wtedy Vercel GET tylko czyta stan; kick przez POST …/register.
  */
 export function kickPipelineBackground(
   id: string,
   budgetMs = 240_000
 ): void {
+  recentBgKicks.set(id, Date.now());
   void (async () => {
     const deadline = Date.now() + budgetMs;
     while (Date.now() < deadline) {

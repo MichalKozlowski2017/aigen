@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { checkComfyHealth } from "@/lib/studio/comfy-client";
+import { isPipelineLegionWorker } from "@/lib/studio/config";
 import {
   friendlyComfyError,
   formatFriendlyErrorLines,
@@ -17,6 +18,12 @@ export const dynamic = "force-dynamic";
 /** Start + enqueue c0; tło dociąga kolejne chunki w ramach budżetu. */
 export const maxDuration = 300;
 
+/**
+ * Start pipeline (enqueue c0).
+ *
+ * Kolejne chunki: Legion worker (preferowane) albo Vercel `after()` best-effort.
+ * Browser poll (`GET …/[id]`) NIE jest source of truth — tylko status + opcjonalny advance.
+ */
 export async function POST(request: Request) {
   const denied = await requireStudioApiAuth();
   if (denied) return denied;
@@ -86,11 +93,15 @@ export async function POST(request: Request) {
   try {
     const { pipeline, warnings } = await startVideoPipeline(parsed.data);
     const job = pipelineToJobView(pipeline);
+    const legionWorker = isPipelineLegionWorker();
 
-    // Kontynuuj c1…stitch nawet gdy UI padnie (budżet = maxDuration platformy).
-    after(() => {
-      kickPipelineBackground(pipeline.id);
-    });
+    // Bez Legion worker: best-effort after() (jedna pętla na start — nie na każde poll).
+    // Z Legion worker: worker woła POST …/register i orkiestruje chunki.
+    if (!legionWorker) {
+      after(() => {
+        kickPipelineBackground(pipeline.id);
+      });
+    }
 
     return NextResponse.json({
       ok: true,
@@ -105,6 +116,7 @@ export async function POST(request: Request) {
         warnings,
       },
       chunkInfo: job.chunk,
+      advanceMode: legionWorker ? "legion-worker" : "vercel-best-effort",
     });
   } catch (err) {
     const attached = (
