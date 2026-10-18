@@ -680,6 +680,29 @@ export async function fetchComfyViewText(
 }
 
 /**
+ * true gdy klasa node'a jest w Comfy `/object_info` (graceful false przy offline).
+ */
+export async function comfyHasNodeClass(
+  classType: string,
+  options?: { timeoutMs?: number }
+): Promise<boolean> {
+  const name = classType.trim();
+  if (!name) return false;
+  try {
+    const res = await fetchComfy(
+      `/object_info/${encodeURIComponent(name)}`,
+      { timeoutMs: options?.timeoutMs ?? 4_000 }
+    );
+    if (!res.ok) return false;
+    const data = (await res.json().catch(() => null)) as unknown;
+    if (!data || typeof data !== "object") return false;
+    return name in (data as Record<string, unknown>);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Lista plików w folderze modeli ComfyUI (GET /models/{folder}).
  * Zwraca same nazwy plików (lokalny Comfy) albo wyciąga `.name` z formatu cloud.
  */

@@ -54,7 +54,8 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 | Zmienna | Opis |
 |---------|------|
 | `COMFYUI_URL` | Adres API ComfyUI — lokalnie `http://127.0.0.1:8188`; na Vercel URL tunelu (Named = stały, Quick = override z auto-publish) |
-| `COMFY_URL_UPDATE_SECRET` | Bearer dla `POST /api/settings/comfy-url` (Legion auto-publish). Alternatywa: `REVALIDATE_SECRET` |
+| `COMFY_URL_UPDATE_SECRET` | Bearer dla `POST /api/settings/comfy-url` (Legion auto-publish). **Wymagany** — `REVALIDATE_SECRET` nie wystarczy |
+| `COMFY_URL_ALLOW_HOSTS` | Opcjonalny allowlist poza `*.trycloudflare.com` (np. Named Tunnel host) |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Opcjonalnie Vercel KV — trwały override Quick Tunnel bez redeploy |
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel: `/history` + indeks w Comfy input |

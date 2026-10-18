@@ -31,8 +31,8 @@ import {
   snapWanLength,
   type VideoEngineId,
 } from "./video-engines";
-import { planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
-import { planWanChunks } from "./wan-chunks";
+import { LTX_CHUNK_OVERLAP, planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
+import { WAN_CHUNK_OVERLAP, planWanChunks } from "./wan-chunks";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
 import txt2imgTemplate from "./workflows/txt2img-sdxl.json";
 import txt2videoLtxTemplate from "./workflows/txt2video-ltx.json";
@@ -104,6 +104,11 @@ import {
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
+import {
+  WAN_SAGE_ATTENTION_MODE,
+  WAN_SAGE_NODE_CLASS,
+  resolveWanSageAttentionNode,
+} from "./wan-sage";
 import { getWanQualityPreset } from "./video-presets";
 
 function deepClone<T>(value: T): T {
@@ -599,6 +604,12 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       samplerName = WAN_FAST_NO_LORA_SAMPLER;
       scheduler = WAN_FAST_NO_LORA_SCHEDULER;
     }
+    // Fast: Patch Sage Attention KJ gdy dostępny (nie CLI --use-sage-attention)
+    const sage = await resolveWanSageAttentionNode();
+    if (sage.available) {
+      spliceWanSageAttention(graph);
+    }
+    // Brak KJNodes / offline — graceful skip (bez warning spam na każdy chunk)
   } else {
     steps = body.steps ?? preset?.steps ?? 18;
     cfg = body.cfg ?? preset?.cfg ?? 6;
@@ -617,6 +628,12 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
   if (body.faceRestore) {
     spliceFaceRestore(graph, "8", "21", body.faceRestoreFidelity);
     imageSourceForTail = "91";
+  }
+
+  // Chunk >0: drop overlapping start frame in Comfy (ImageFromBatch index 1)
+  // zanim VHS — ffmpeg stitch może wtedy -c copy bez trim/re-encode.
+  if (chunkIdx > 0) {
+    spliceSkipOverlapFrames(graph, "21", WAN_CHUNK_OVERLAP);
   }
 
   if (body.ltxSaveTail) {
@@ -656,6 +673,23 @@ function spliceWanDistillLora(
   if (graph["54"]) {
     graph["54"].inputs.model = ["55", 0];
   }
+}
+
+/**
+ * ModelSamplingSD3 (54) → PathchSageAttentionKJ (56) → KSampler (3).
+ * Mode: sageattn_qk_int8_pv_fp16_cuda (preferowane vs CLI / triton).
+ */
+function spliceWanSageAttention(graph: WorkflowGraph): void {
+  if (!graph["54"] || !graph["3"]) return;
+  graph["56"] = {
+    class_type: WAN_SAGE_NODE_CLASS,
+    inputs: {
+      model: ["54", 0],
+      sage_attention: WAN_SAGE_ATTENTION_MODE,
+      allow_compile: false,
+    },
+  };
+  graph["3"].inputs.model = ["56", 0];
 }
 
 /**
@@ -714,6 +748,11 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
     imageSourceForTail = "91";
   }
 
+  // Chunk >0: drop overlapping start frame przed VHS (jak Wan)
+  if (chunkIdx > 0) {
+    spliceSkipOverlapFrames(graph, "21", LTX_CHUNK_OVERLAP);
+  }
+
   // Ostatnia klatka → input kolejnego chunka (Legion: last-frame continue)
   if (body.ltxSaveTail) {
     graph["22"] = {
@@ -768,4 +807,29 @@ function spliceFaceRestore(
   if (graph[combineNodeId]) {
     graph[combineNodeId].inputs.images = ["91", 0];
   }
+}
+
+/**
+ * Chunk continue: pomiń pierwsze `overlap` klatek (duplikat last-frame z cN-1)
+ * przed VHS_VideoCombine — unikamy ffmpeg trim + re-encode przy stitch.
+ * Tail (SaveImage last frame) nadal bierze z pełnego batcha decode/face.
+ */
+function spliceSkipOverlapFrames(
+  graph: WorkflowGraph,
+  combineNodeId: string,
+  overlap: number = 1
+): void {
+  if (overlap <= 0) return;
+  const combine = graph[combineNodeId];
+  if (!combine?.inputs?.images) return;
+  const images = combine.inputs.images as [string, number];
+  graph["24"] = {
+    class_type: "ImageFromBatch",
+    inputs: {
+      image: images,
+      batch_index: overlap,
+      length: -1,
+    },
+  };
+  combine.inputs.images = ["24", 0];
 }

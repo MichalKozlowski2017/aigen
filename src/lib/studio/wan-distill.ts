@@ -30,9 +30,12 @@ export const WAN_FAST_NO_LORA_CFG = 6;
 export const WAN_FAST_NO_LORA_SAMPLER = "uni_pc";
 export const WAN_FAST_NO_LORA_SCHEDULER = "simple";
 
-/** Geometria Fast / lightx2v 480p (nie mieszać z UNET 720p). */
+/** Geometria Fast / lightx2v 480p landscape (nie mieszać z UNET 720p). */
 export const WAN_FAST_WIDTH = WAN_UI_LIMITS.defaultWidth;
 export const WAN_FAST_HEIGHT = WAN_UI_LIMITS.defaultHeight;
+/** Portrait Fast 480p — ta sama „krótka” krawędź 480. */
+export const WAN_FAST_PORTRAIT_WIDTH = WAN_UI_LIMITS.defaultHeight;
+export const WAN_FAST_PORTRAIT_HEIGHT = WAN_UI_LIMITS.defaultWidth;
 
 /** Clamp steps gdy LoRA distill aktywna — zewnętrzne wartości nie wychodzą poza 4–8. */
 export function clampWanDistillSteps(steps: number | undefined): number {
@@ -46,7 +49,21 @@ export function clampWanDistillSteps(steps: number | undefined): number {
   );
 }
 
-/** true gdy rozdzielczość / model wygląda na 720p. */
+/**
+ * Portrait gdy wysokość > szerokość (wymiary UI / start image).
+ * Równe / landscape → false (domyślnie 832×480).
+ */
+export function isWanFastPortrait(options: {
+  width?: number;
+  height?: number;
+}): boolean {
+  const w = options.width ?? 0;
+  const h = options.height ?? 0;
+  if (w <= 0 || h <= 0) return false;
+  return h > w;
+}
+
+/** true gdy rozdzielczość / model wygląda na Quality 720p (nie Fast 480×832). */
 export function looksLikeWan720(options: {
   width?: number;
   height?: number;
@@ -54,7 +71,11 @@ export function looksLikeWan720(options: {
 }): boolean {
   const w = options.width ?? 0;
   const h = options.height ?? 0;
-  if (w >= 1024 || h >= 640) return true;
+  const shortSide = Math.min(w, h);
+  const longSide = Math.max(w, h);
+  // Fast 480p: 832×480 / 480×832 — short=480, long=832
+  // Quality 720p: 1280×720 / 720×1280 — short≥640 lub long≥1024
+  if (shortSide >= 640 || longSide >= 1024) return true;
   const m = (options.model ?? "").toLowerCase();
   return m.includes("720p") || m.includes("720_");
 }
@@ -109,8 +130,10 @@ export function wantsWanDistill(qualityPreset: string | undefined): boolean {
 }
 
 /**
- * Fast + distill LoRA = wyłącznie 480p (832×480, UNET 480p).
- * Coerce width/height/model; warning gdy API prosiło o 720p.
+ * Fast + distill LoRA = wyłącznie 480p (UNET 480p).
+ * Zachowuje orientację: landscape 832×480, portrait 480×832
+ * (z width/height UI albo wymiarów start image).
+ * Coerce model; warning gdy API prosiło o 720p.
  */
 export function coerceWanFast480pGeometry(options: {
   qualityPreset?: string;
@@ -123,6 +146,7 @@ export function coerceWanFast480pGeometry(options: {
   height: number;
   model: string;
   locked: boolean;
+  portrait: boolean;
   warning: string | null;
 } {
   const distillOn =
@@ -135,10 +159,14 @@ export function coerceWanFast480pGeometry(options: {
       height: options.height ?? WAN_FAST_HEIGHT,
       model: options.model?.trim() || DEFAULT_WAN_UNET,
       locked: false,
+      portrait: isWanFastPortrait(options),
       warning: null,
     };
   }
 
+  const portrait = isWanFastPortrait(options);
+  const width = portrait ? WAN_FAST_PORTRAIT_WIDTH : WAN_FAST_WIDTH;
+  const height = portrait ? WAN_FAST_PORTRAIT_HEIGHT : WAN_FAST_HEIGHT;
   const wanted720 = looksLikeWan720(options);
   const modelRaw = options.model?.trim() || "";
   const model =
@@ -147,12 +175,13 @@ export function coerceWanFast480pGeometry(options: {
       : modelRaw;
 
   return {
-    width: WAN_FAST_WIDTH,
-    height: WAN_FAST_HEIGHT,
+    width,
+    height,
     model,
     locked: true,
+    portrait,
     warning: wanted720
-      ? "Fast + lightx2v LoRA jest tylko 480p (832×480) — zignorowano 720p. Użyj presetu Quality 720p bez Fast LoRA."
+      ? `Fast + lightx2v LoRA jest tylko 480p (${width}×${height}) — zignorowano 720p. Użyj presetu Quality 720p bez Fast LoRA.`
       : null,
   };
 }

@@ -151,7 +151,6 @@ function Publish-ComfyUrlIfConfigured {
   $panel = $env:AIGEN_PANEL_URL
   if (-not $panel) { $panel = $env:AIGEN_URL }
   $secret = $env:COMFY_URL_UPDATE_SECRET
-  if (-not $secret) { $secret = $env:REVALIDATE_SECRET }
   if (-not $panel -or -not $secret) {
     Write-StackLog "Auto-publish pominiety (ustaw AIGEN_PANEL_URL + COMFY_URL_UPDATE_SECRET)"
     return

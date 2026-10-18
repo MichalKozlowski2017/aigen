@@ -12,15 +12,17 @@ export type StitchClip = {
 };
 
 /**
- * Pobiera klipy z Comfy /view, skleja ffmpeg (pomija overlap w chunkach 2…N),
- * wrzuca wynik z powrotem do Comfy input (jako plik do galerii przez upload type=output... 
+ * Pobiera klipy z Comfy /view, skleja ffmpeg (pomija overlap w chunkach 2…N
+ * gdy overlapFrames>0 — legacy / ręczne stitch). Pipeline dropuje overlap
+ * w Comfy (ImageFromBatch) i woła z overlapFrames=0.
+ *
  * Upload API only does input — wrzucamy do input z nazwą stitched, albo output via /upload).
  *
  * Comfy /upload/image type=input. Dla galerii lepiej type=output — używamy upload z type input
- * i zwracamy nazwę; klient odświeży galerię z historii po generate stitch job... 
+ * i zwracamy nazwę; klient odświeży galerię z historii po generate stitch job...
  *
  * Prościej: zapis lokalny temp + upload jako image nie zadziała dla mp4.
- * Comfy POST /upload/image accepts images; for video use /upload/image still? 
+ * Comfy POST /upload/image accepts images; for video use /upload/image still?
  * Actually Comfy has POST /upload/image for images only.
  *
  * Legion pattern: write to Comfy output folder via... we can't write output remotely easily.
@@ -73,7 +75,7 @@ export async function stitchComfyClips(options: {
         continue;
       }
       const out = path.join(tmp, `trim_${i}.mp4`);
-      // Pomiń pierwsze `overlap` klatek (kontynuacja last-frame)
+      // Legacy: pomiń pierwsze `overlap` klatek (gdy Comfy nie dropnął)
       const startSec = overlap / fps;
       await runFfmpeg([
         "-y",
@@ -102,7 +104,7 @@ export async function stitchComfyClips(options: {
     );
 
     const stitched = path.join(tmp, "stitched.mp4");
-    // -c copy tylko gdy codec/rozmiar/pix_fmt się zgadzają; inaczej CRF (preset fast)
+    // -c copy tylko gdy codec/rozmiar/pix_fmt/fps/timebase się zgadzają; inaczej CRF18
     const canCopy = await clipsCompatibleForCopy(trimmed);
     if (canCopy) {
       try {
@@ -218,7 +220,48 @@ function concatEncodeArgs(
   ];
 }
 
-/** fingerprint: codec|pix_fmt|WxH — wystarczy do bezpiecznego concat -c copy */
+export type VideoFingerprint = {
+  codec: string;
+  pixFmt: string;
+  size: string;
+  /** fps z linii Video (np. 16) — string znormalizowany */
+  fps: string;
+  /** timebase numerator (tbn), np. 16384 */
+  tbn: string;
+};
+
+/** fingerprint: codec|pix_fmt|WxH|fps|tbn — bezpieczny concat -c copy */
+export function formatVideoFingerprint(fp: VideoFingerprint): string {
+  return `${fp.codec}|${fp.pixFmt}|${fp.size}|${fp.fps}|${fp.tbn}`;
+}
+
+export function parseFfmpegVideoFingerprint(
+  stderr: string
+): VideoFingerprint | null {
+  // np. Video: h264 (High) (avc1 / 0x31637661), yuv420p, 832x480, 16 fps, 16 tbr, 16384 tbn
+  const m = stderr.match(
+    /Video:\s*([^,\s]+).*?,\s*([^,({\s]+).*?,\s*(\d+)x(\d+)/i
+  );
+  if (!m) return null;
+
+  const fpsMatch = stderr.match(/(\d+(?:\.\d+)?)\s*fps/i);
+  const tbrMatch = stderr.match(/(\d+(?:\.\d+)?)\s*tbr/i);
+  const tbnMatch = stderr.match(/(\d+)\s*tbn/i);
+
+  const fpsRaw = fpsMatch?.[1] ?? tbrMatch?.[1] ?? "?";
+  const fpsNum = Number(fpsRaw);
+  const fps = Number.isFinite(fpsNum) ? String(Math.round(fpsNum * 1000) / 1000) : fpsRaw;
+  const tbn = tbnMatch?.[1] ?? "?";
+
+  return {
+    codec: m[1]!.toLowerCase(),
+    pixFmt: m[2]!.toLowerCase(),
+    size: `${m[3]}x${m[4]}`,
+    fps,
+    tbn,
+  };
+}
+
 async function probeVideoFingerprint(file: string): Promise<string | null> {
   return new Promise((resolve) => {
     const child = spawn(resolveFfmpegBin(), ["-hide_banner", "-i", file], {
@@ -230,17 +273,8 @@ async function probeVideoFingerprint(file: string): Promise<string | null> {
     });
     child.on("error", () => resolve(null));
     child.on("close", () => {
-      // np. Video: h264 (High) (avc1 / 0x31637661), yuv420p, 832x480, …
-      const m = err.match(
-        /Video:\s*([^,\s]+).*?,\s*([^,({\s]+).*?,\s*(\d+)x(\d+)/i
-      );
-      if (!m) {
-        resolve(null);
-        return;
-      }
-      resolve(
-        `${m[1]!.toLowerCase()}|${m[2]!.toLowerCase()}|${m[3]}x${m[4]}`
-      );
+      const fp = parseFfmpegVideoFingerprint(err);
+      resolve(fp ? formatVideoFingerprint(fp) : null);
     });
   });
 }

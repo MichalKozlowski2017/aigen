@@ -4,16 +4,16 @@
 
 .DESCRIPTION
   Option A (domyślnie): POST /api/settings/comfy-url z Bearer COMFY_URL_UPDATE_SECRET
-  (albo REVALIDATE_SECRET). Panel trzyma override w pamięci + opcjonalnie Vercel KV
-  (KV_REST_API_*) — bez redeploy.
+  (dedykowany; REVALIDATE_SECRET nie wystarczy). Panel trzyma override w pamięci
+  + opcjonalnie Vercel KV (KV_REST_API_*) — bez redeploy.
+  Hosty: *.trycloudflare.com (+ COMFY_URL_ALLOW_HOSTS na Vercel).
 
   Option B (-UpdateVercelEnv): aktualizuje env COMFYUI_URL przez Vercel REST API
   i próbuje redeploy (wolniejsze, działa bez KV).
 
   Zmienne ENV (Legion):
     AIGEN_PANEL_URL          np. https://aigen.vercel.app
-    COMFY_URL_UPDATE_SECRET   ten sam sekret co na Vercel
-    (albo REVALIDATE_SECRET)
+    COMFY_URL_UPDATE_SECRET   ten sam sekret co na Vercel (wymagany)
     VERCEL_TOKEN / VERCEL_PROJECT_ID / VERCEL_TEAM_ID  — tylko Option B
 
 .EXAMPLE
@@ -74,7 +74,6 @@ if (-not $PanelUrl) { $PanelUrl = $env:AIGEN_PANEL_URL }
 if (-not $PanelUrl) { $PanelUrl = $env:AIGEN_URL }
 if (-not $Secret) {
   $Secret = $env:COMFY_URL_UPDATE_SECRET
-  if (-not $Secret) { $Secret = $env:REVALIDATE_SECRET }
 }
 
 if (-not $UpdateVercelEnv) {
@@ -82,7 +81,7 @@ if (-not $UpdateVercelEnv) {
     throw "Brak -PanelUrl / AIGEN_PANEL_URL (np. https://twoj-projekt.vercel.app)"
   }
   if (-not $Secret) {
-    throw "Brak -Secret / COMFY_URL_UPDATE_SECRET (lub REVALIDATE_SECRET)"
+    throw "Brak -Secret / COMFY_URL_UPDATE_SECRET (REVALIDATE_SECRET nie wystarczy)"
   }
 
   $endpoint = ($PanelUrl.TrimEnd("/")) + "/api/settings/comfy-url"

@@ -43,6 +43,26 @@ import {
   WAN_DISTILL_STEPS_MIN,
   coerceWanFast480pGeometry,
 } from "@/lib/studio/wan-distill";
+
+function readImageOrientation(
+  file: File
+): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const width = img.naturalWidth || 0;
+      const height = img.naturalHeight || 0;
+      URL.revokeObjectURL(url);
+      resolve(width > 0 && height > 0 ? { width, height } : null);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
 import {
   mergeJobProgressWithWs,
   useComfyWsProgress,
@@ -213,14 +233,24 @@ export function GenerateForm({
     videoEngine === "wan" &&
     (qualityPreset === "fast-480p" || qualityPreset === "smooth-24");
 
+  const wanFastGeo = wanFastLocked
+    ? coerceWanFast480pGeometry({
+        qualityPreset,
+        wanDistillLora: true,
+        width,
+        height,
+        model,
+      })
+    : null;
+
   const videoPlan =
     kind === "video"
       ? videoEngine === "wan"
         ? planWanVideo(
-            wanFastLocked
+            wanFastGeo?.locked
               ? {
-                  width: WAN_UI_LIMITS.defaultWidth,
-                  height: WAN_UI_LIMITS.defaultHeight,
+                  width: wanFastGeo.width,
+                  height: wanFastGeo.height,
                   fps,
                   durationSec,
                 }
@@ -660,6 +690,20 @@ export function GenerateForm({
         subfolder: "",
         type: "input",
       });
+      // Fast 480p: orientacja z wymiarów start image → 832×480 / 480×832
+      const dims = await readImageOrientation(file);
+      if (dims && videoEngine === "wan") {
+        const geo = coerceWanFast480pGeometry({
+          qualityPreset,
+          wanDistillLora:
+            qualityPreset === "fast-480p" || qualityPreset === "smooth-24",
+          width: dims.width,
+          height: dims.height,
+          model,
+        });
+        setWidth(geo.width);
+        setHeight(geo.height);
+      }
     } catch {
       setError("Błąd sieci przy uploadzie");
       setStartImage("");
@@ -1423,7 +1467,7 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={wanFastLocked ? WAN_UI_LIMITS.defaultWidth : width}
+              value={wanFastGeo?.locked ? wanFastGeo.width : width}
               disabled={wanFastLocked}
               onChange={(e) => setWidth(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"
@@ -1447,7 +1491,7 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={wanFastLocked ? WAN_UI_LIMITS.defaultHeight : height}
+              value={wanFastGeo?.locked ? wanFastGeo.height : height}
               disabled={wanFastLocked}
               onChange={(e) => setHeight(Number(e.target.value))}
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"

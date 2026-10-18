@@ -100,7 +100,8 @@ Gdy **nie ma** strefy DNS na Cloudflare, Named Tunnel hostname nie zadziała. Za
 | Zmienna | Wartość |
 |---------|---------|
 | `COMFYUI_URL` | ostatni znany Quick URL (bootstrap; może być stary) |
-| `COMFY_URL_UPDATE_SECRET` | długi losowy sekret (albo `REVALIDATE_SECRET`) |
+| `COMFY_URL_UPDATE_SECRET` | długi losowy sekret (**wymagany**; `REVALIDATE_SECRET` nie wystarczy) |
+| `COMFY_URL_ALLOW_HOSTS` | opcjonalnie Named Tunnel host (poza `*.trycloudflare.com`) |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | **zalecane** — Storage → KV w Vercel (trwały override między cold startami) |
 | `STUDIO_PASSWORD` | jak zwykle |
 
@@ -111,6 +112,8 @@ Redeploy po dodaniu sekretu.
 ```text
 AIGEN_PANEL_URL=https://TWOJ-PROJEKT.vercel.app
 COMFY_URL_UPDATE_SECRET=<ten sam sekret co na Vercel>
+# opcjonalnie Named Tunnel:
+# COMFY_URL_ALLOW_HOSTS=comfy.twoja-domena.com
 ```
 
 ### 3) Publish

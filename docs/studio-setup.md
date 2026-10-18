@@ -52,7 +52,8 @@ Na Vercel ustaw:
 COMFYUI_URL=https://comfy.your-domain.com
 STUDIO_PASSWORD=...
 # Bez domeny (Quick Tunnel auto-sync):
-# COMFY_URL_UPDATE_SECRET=...
+# COMFY_URL_UPDATE_SECRET=...   # wymagany dla auto-publish (nie REVALIDATE_SECRET)
+# COMFY_URL_ALLOW_HOSTS=...          # opcjonalnie poza *.trycloudflare.com
 # KV_REST_API_URL=...   # opcjonalnie, trwały override
 # KV_REST_API_TOKEN=...
 # PIPELINE_LEGION_WORKER — zostaw wyłączone (patrz §6). Nie włączać domyślnie.
@@ -103,21 +104,29 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 ### Wan Fast (distill LoRA)
 
 - Plik: `models/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`
-- Preset **Fast**: **tylko 480p** (832×480, UNET 480p). Steps **4–8**, **CFG=1**, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje — API/UI nie nadpiszą (np. cfg=6 / 720p → coerce + warning)
+- Preset **Fast**: **tylko 480p** — landscape **832×480** / portrait **480×832** (orientacja ze start image). Steps **4–8**, **CFG=1**, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje — API/UI nie nadpiszą (np. cfg=6 / 720p → coerce + warning)
 - Brak LoRA na Comfy → graceful fallback (steps ~10, CFG 6, bez LoRA) + ostrzeżenie w UI
 - **Quality 720p** = bez Fast LoRA / więcej steps; **Native 24** = experimental (preferuj Smooth 24 / RIFE)
+- Chunki: max **81** klatek/chunk (SAFE @ FP8); overlap drop w Comfy (`ImageFromBatch` index 1 dla chunk>0) + stitch probe fps/timebase przed `-c copy`
 
-### Comfy na Legionie (opcjonalnie Sage / --fast)
+### Tip: 480p + RealESRGAN + RIFE vs native 720p
 
-AIGen nie uruchamia Comfy — tylko woła API. Na Legionie możesz dodać flagi przy starcie (osobno od panelu):
+Na ~16 GB VRAM zwykle **szybciej i stabilniej**: Fast 480p → opcjonalnie RealESRGAN (post) + RIFE 16→24, niż native Quality 720p (dłuższe chunki, więcej offload). Quality 720p zostaw gdy potrzebujesz natywnej ostrości bez upscale.
+
+### RAM: nie przełączaj Flux ↔ Wan w serii
+
+Serie Wan bez przełączania na Flux między jobami — unika thrash / reload modeli w VRAM+RAM na Legionie.
+
+### Comfy na Legionie (`--fast` + Sage via KJNodes)
+
+AIGen nie uruchamia Comfy — tylko woła API. Na Legionie:
 
 ```bash
+# Zalecane: --fast TAK; --use-sage-attention NIE (ryzyko black frames na Wan)
 python main.py --listen 127.0.0.1 --port 8188 --fast
-# opcjonalnie SageAttention jeśli zainstalowane w venv Comfy (zależnie od buildu):
-# python main.py --listen 127.0.0.1 --port 8188 --use-sage-attention
 ```
 
-Sprawdź `python main.py --help` na swojej wersji Comfy — nazwy flag bywają różne.
+SageAttention: zainstaluj `ComfyUI-KJNodes` + pakiet `sageattention` w venv. Panel Wan Fast wstawia node **`PathchSageAttentionKJ`** (Patch Sage Attention KJ) z trybem `sageattn_qk_int8_pv_fp16_cuda` gdy `/object_info` go widzi — graceful skip gdy brak. **Nie** włączaj globalnego `--use-sage-attention`.
 
 ## 6. Pipeline chunków (Wan/LTX)
 

@@ -94,6 +94,33 @@ async function writeToKv(url: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Host allowlist for POST /api/settings/comfy-url.
+ * Always: `*.trycloudflare.com`. Extra: `COMFY_URL_ALLOW_HOSTS` (comma-separated
+ * exact hosts or `*.example.com` suffixes).
+ */
+export function isAllowedComfyPublishHost(hostname: string): boolean {
+  const host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!host) return false;
+  if (host === "trycloudflare.com" || host.endsWith(".trycloudflare.com")) {
+    return true;
+  }
+  const raw = trimOrUndefined(process.env.COMFY_URL_ALLOW_HOSTS);
+  if (!raw) return false;
+  for (const part of raw.split(",")) {
+    const entry = part.trim().toLowerCase().replace(/\.$/, "");
+    if (!entry) continue;
+    if (entry.startsWith("*.")) {
+      const suffix = entry.slice(2);
+      if (!suffix) continue;
+      if (host === suffix || host.endsWith(`.${suffix}`)) return true;
+      continue;
+    }
+    if (host === entry) return true;
+  }
+  return false;
+}
+
 export function normalizeComfyPublishUrl(raw: string): string | null {
   const trimmed = raw.trim().replace(/\/$/, "");
   if (!trimmed) return null;
@@ -104,6 +131,7 @@ export function normalizeComfyPublishUrl(raw: string): string | null {
     return null;
   }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+  if (!isAllowedComfyPublishHost(parsed.hostname)) return null;
   return trimmed;
 }
 
@@ -139,6 +167,24 @@ export type SetComfyUrlResult = {
 export async function setComfyUrlOverride(
   url: string
 ): Promise<SetComfyUrlResult> {
+  const trimmed = url.trim().replace(/\/$/, "");
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    parsed = null;
+  }
+  if (
+    !parsed ||
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:")
+  ) {
+    throw new Error("Invalid COMFYUI_URL");
+  }
+  if (!isAllowedComfyPublishHost(parsed.hostname)) {
+    throw new Error(
+      `Host niedozwolony (${parsed.hostname}). Dozwolone: *.trycloudflare.com oraz COMFY_URL_ALLOW_HOSTS.`
+    );
+  }
   const normalized = normalizeComfyPublishUrl(url);
   if (!normalized) {
     throw new Error("Invalid COMFYUI_URL");
@@ -159,9 +205,11 @@ export async function setComfyUrlOverride(
   };
 }
 
+/**
+ * Bearer dla POST/GET /api/settings/comfy-url.
+ * Wymaga dedykowanego `COMFY_URL_UPDATE_SECRET` — `REVALIDATE_SECRET` nie wystarczy
+ * (sharing deprecated).
+ */
 export function getComfyUrlUpdateSecret(): string | undefined {
-  return (
-    trimOrUndefined(process.env.COMFY_URL_UPDATE_SECRET) ??
-    trimOrUndefined(process.env.REVALIDATE_SECRET)
-  );
+  return trimOrUndefined(process.env.COMFY_URL_UPDATE_SECRET);
 }

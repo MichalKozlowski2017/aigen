@@ -83,7 +83,10 @@ export function resolveWanUnet(options: {
   if (m && m.toLowerCase().includes("wan")) return m;
   const w = options.width ?? WAN_UI_LIMITS.defaultWidth;
   const h = options.height ?? WAN_UI_LIMITS.defaultHeight;
-  if (w >= 1024 || h >= 640) return DEFAULT_WAN_UNET_720P;
+  const shortSide = Math.min(w, h);
+  const longSide = Math.max(w, h);
+  // Fast 480p portrait 480×832 nie jest 720p — short≥640 lub long≥1024
+  if (shortSide >= 640 || longSide >= 1024) return DEFAULT_WAN_UNET_720P;
   return DEFAULT_WAN_UNET;
 }
 
