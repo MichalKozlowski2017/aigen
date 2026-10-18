@@ -24,15 +24,28 @@ powershell -ExecutionPolicy Bypass -File scripts\legion\install-startup-shortcut
 
 Albo ręcznie: Task Scheduler → At log on → ta sama komenda `start-comfy-stack.ps1`.
 
-## COMFYUI_URL po Quick Tunnel
+## COMFYUI_URL — Quick vs Named
 
-Quick Tunnel (`*.trycloudflare.com`) **zmienia hostname** po restarcie `cloudflared`.
+### Quick Tunnel (domyślnie w `start-comfy-stack.ps1`)
+
+`*.trycloudflare.com` **zmienia hostname** po restarcie `cloudflared`.
 
 1. Otwórz `logs\cloudflared-tunnel-url.txt`
 2. Vercel → Project → Settings → Environment Variables → `COMFYUI_URL`
-3. Redeploy (lub wait — env bywa cache’owane do redeploy)
+3. Redeploy (env bywa cache’owane do redeploy)
 
-**Trwały URL:** Named Tunnel (Cloudflare Zero Trust) — wtedy Settings ustawiasz raz. Zobacz `docs/studio-setup.md` / plan Legion.
+### Named Tunnel (zalecane — stały URL)
+
+Pełna instrukcja: [`docs/named-cloudflare-tunnel.md`](../../docs/named-cloudflare-tunnel.md).
+
+Skrót:
+
+1. `cloudflared tunnel login` → `cloudflared tunnel create comfyui-legion`
+2. Config + DNS na `comfy.your-domain.com` → `http://127.0.0.1:8188`
+3. Autostart: `cloudflared tunnel run comfyui-legion` (osobno) **albo** `start-comfy-stack.ps1 -SkipTunnel` + Named w Startup
+4. Vercel **raz**: `COMFYUI_URL=https://comfy.your-domain.com` (bez trailing slash)
+
+Po Named nie musisz klepać Settings po reboocie Legionu.
 
 ## Galeria po reboocie
 

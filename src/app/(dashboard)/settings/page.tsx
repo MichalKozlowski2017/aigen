@@ -62,6 +62,15 @@ export default function StudioSettingsPage() {
             ? " (tunel / Vercel). Ścieżki MODELS/OUTPUT są tylko dla panelu lokalnego."
             : ". Sekretów nie pokazujemy — zmień je w .env.local."}
         </p>
+        {config.comfyRemote ? (
+          <p className="max-w-2xl text-sm text-stone-500">
+            Quick Tunnel (<code className="text-stone-400">*.trycloudflare.com</code>){" "}
+            zmienia hostname po restarcie — użyj{" "}
+            <span className="text-stone-400">Named Tunnel</span> dla stałego URL
+            (np. <code className="text-stone-400">https://comfy.your-domain.com</code>
+            ). Ops: <code className="text-stone-400">docs/named-cloudflare-tunnel.md</code>.
+          </p>
+        ) : null}
       </header>
 
       <dl className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
