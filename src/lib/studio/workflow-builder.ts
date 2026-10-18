@@ -34,6 +34,7 @@ import {
 } from "./video-engines";
 import {
   detectWan22Availability,
+  isWan22FastMoeEnabled,
   WAN22_FAST_CFG,
   WAN22_FAST_HIGH_END_STEP,
   WAN22_FAST_LORA_STRENGTH,
@@ -42,6 +43,7 @@ import {
   WAN22_FAST_SCHEDULER,
   WAN22_FAST_SHIFT,
   WAN22_FAST_STEPS,
+  WAN22_MOE_UNSTABLE_NOTE,
   type Wan22Detect,
 } from "./wan22";
 import { LTX_CHUNK_OVERLAP, planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
@@ -91,6 +93,7 @@ export {
 } from "./video-engines";
 export {
   detectWan22Availability,
+  isWan22FastMoeEnabled,
   WAN22_I2V_HIGH_NOISE_FP8,
   WAN22_I2V_LOW_NOISE_FP8,
   WAN22_I2V_HIGH_NOISE_FP8_FUSED,
@@ -104,6 +107,7 @@ export {
   WAN22_FAST_SAMPLER,
   WAN22_FAST_SCHEDULER,
   WAN22_FAST_SHIFT,
+  WAN22_MOE_UNSTABLE_NOTE,
   type Wan22Detect,
 } from "./wan22";
 
@@ -574,10 +578,10 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
 }
 
 /**
- * Wan I2V — Fast preferuje Wan 2.2 MoE (high+low + lightx2v 4-step) gdy
- * pliki na Comfy; inaczej Wan 2.1 UNET + opcjonalnie LoRA distill.
+ * Wan I2V — Fast domyślnie Wan 2.1 UNET + lightx2v distill LoRA.
+ * Wan 2.2 MoE tylko gdy WAN22_MOE_ENABLE=1 (RTX 5080 / sm_120 CUDA unstable).
  * CLIPLoader(type=wan) + CLIPVision + WanImageToVideo + ModelSamplingSD3
- * + KSampler(/Advanced) + VHS. Opcjonalnie CodeFormer; last-frame (chunk).
+ * + KSampler(+ opcjonalnie Advanced MoE) + VHS. Opcjonalnie CodeFormer; tail.
  */
 async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
   workflow: WorkflowGraph;
@@ -676,7 +680,7 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
   let usedWan22Moe = false;
 
   if (wantDistill) {
-    // Prefer Wan 2.2 Fast MoE when high+low (+ LoRA / fused) present
+    // Wan 2.2 MoE opt-in only (WAN22_MOE_ENABLE) — default Fast = Wan 2.1
     let w22: Wan22Detect | null = null;
     try {
       w22 = await detectWan22Availability();
@@ -684,7 +688,13 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       w22 = null;
     }
 
-    if (w22?.fastMoeReady && w22.highNoise && w22.lowNoise) {
+    const moeOptIn = isWan22FastMoeEnabled();
+    if (
+      moeOptIn &&
+      w22?.fastMoeReady &&
+      w22.highNoise &&
+      w22.lowNoise
+    ) {
       // MoE wymaga KSamplerAdvanced — gdy Legion object_info go nie ma,
       // spadamy na Wan 2.1 Fast z jasnym komunikatem (nie SVD nonsense).
       let moeNodeOk = false;
@@ -718,6 +728,9 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
           warnings.push(w22.note);
         }
       }
+    } else if (chunkIdx === 0 && !moeOptIn) {
+      // Always tell UI Fast prefers 2.1 while MoE unstable on RTX 5080
+      warnings.push(WAN22_MOE_UNSTABLE_NOTE);
     }
     if (!usedWan22Moe) {
       const distill = await resolveWanDistillLora();

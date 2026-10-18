@@ -482,6 +482,9 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
 
       if (parsed.failed) {
         const friendly = friendlyComfyError(parsed.errorRaw ?? entry);
+        // Full lines (message + hint + details) so UI never shows bare „Chunk failed”
+        // without Comfy exception text (e.g. CUDA no-kernel / node_errors dump).
+        const full = formatFriendlyErrorLines(friendly);
         return {
           promptId,
           status: "failed",
@@ -495,7 +498,7 @@ export async function getJobStatus(promptId: string): Promise<JobStatus> {
             nodesDone,
             nodesTotal,
             executionStartMs: parsed.executionStartMs,
-            errorMessage: friendly.message,
+            errorMessage: full || friendly.message,
             errorHint: friendly.hint ?? null,
             errorLinkHref: friendly.linkHref ?? null,
             errorLinkLabel: friendly.linkLabel ?? null,

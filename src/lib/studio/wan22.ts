@@ -5,15 +5,28 @@
  *   diffusion_models/wan2.2_i2v_{high,low}_noise_14B_fp8_scaled.safetensors
  *   loras/wan2.2_i2v_lightx2v_4steps_lora_v1_{high,low}_noise.safetensors
  *
- * Fast path prefers MoE when high+low UNETs and (LoRA pair OR fused distill
- * UNETs) are on Comfy; otherwise falls back to Wan 2.1 + lightx2v 480p.
+ * Default Fast = Wan 2.1 + lightx2v. MoE is opt-in (WAN22_MOE_ENABLE=1) —
+ * RTX 5080 / sm_120 hits cudaErrorNoKernelImageForDevice on low KSamplerAdvanced.
  *
- * Graph: 2× UNETLoader → optional LoRA → optional PathchSageAttentionKJ →
+ * Graph (when enabled): 2× UNETLoader → optional LoRA → optional Sage KJ →
  * ModelSamplingSD3(shift=5) → KSamplerAdvanced high (0→2) →
  * KSamplerAdvanced low (2→4) → VAEDecode. CFG=1, euler/simple, 4 steps.
  * Aligns with Comfy-Org video_wan2_2_14B_i2v + lightx2v 4-step NativeComfy.
  */
 import { listComfyModelFolder } from "./comfy-client";
+
+/**
+ * Opt-in Wan 2.2 Fast MoE. Default false until MoE proven on sm_120.
+ * Env: WAN22_MOE_ENABLE=1|true|yes
+ */
+export function isWan22FastMoeEnabled(): boolean {
+  const v = process.env.WAN22_MOE_ENABLE?.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+/** UI / pipeline note when MoE weights exist but MoE is disabled. */
+export const WAN22_MOE_UNSTABLE_NOTE =
+  "Wan 2.2 MoE chwilowo niestabilne na RTX 5080 — Fast = Wan 2.1 + lightx2v. Włącz MoE dopiero po fixie PyTorch/sm_120 (WAN22_MOE_ENABLE=1).";
 
 /** Comfy-Org repackaged FP8 (Legion SoT) — base UNETs + separate lightx2v LoRAs. */
 export const WAN22_I2V_HIGH_NOISE_FP8 =

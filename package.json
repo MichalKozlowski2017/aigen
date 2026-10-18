@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "smoke:wan22-chunks": "npx --yes tsx scripts/smoke-wan22-chunks.ts",
+    "smoke:wan21-fast": "npx --yes tsx scripts/smoke-wan21-fast.ts",
     "smoke:comfy-errors": "npx --yes tsx scripts/smoke-comfy-errors.ts"
   },
   "dependencies": {
