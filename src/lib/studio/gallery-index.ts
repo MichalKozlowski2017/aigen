@@ -59,11 +59,16 @@ export function parseGalleryIndex(raw: string): GalleryIndexEntry[] {
   }
 }
 
-/** Odczyt indeksu z Comfy input przez `/view` (tunel). */
+/**
+ * Odczyt indeksu z Comfy input przez `/view` (tunel).
+ * Brak pliku (404) → []; błąd sieci/timeout → rzuca (żeby galeria mogła
+ * pokazać „indeks: …” zamiast cicho wracać pustą listę).
+ */
 export async function loadGalleryIndex(): Promise<GalleryIndexEntry[]> {
   const text = await fetchComfyViewText(GALLERY_INDEX_FILENAME, "", "input", {
-    timeoutMs: 10_000,
+    timeoutMs: 12_000,
     minBytes: 2,
+    throwOnError: true,
   });
   if (!text) return [];
   return parseGalleryIndex(text);

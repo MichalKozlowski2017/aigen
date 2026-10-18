@@ -54,7 +54,8 @@ STUDIO_PASSWORD=...
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
-- **Galeria:** `/history` + trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe historii) + stock `/internal/files/output` (tylko root) + `/api/comfy-view`. Po restarcie Comfy z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
+- **Galeria (index-first):** najpierw trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe `/history` po reboocie), potem opcjonalnie `/history` + stock `/internal/files/output` (tylko gdy indeks pusty/skąpy; `/internal/files` nie rekuruje `studio/`). Proxy plików: `/api/comfy-view`. Po restarcie z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
+- **Autostart Legion:** jeden skrypt `scripts/legion/start-comfy-stack.ps1` (Comfy + cloudflared + queue worker). URL Quick Tunnel → `logs/cloudflared-tunnel-url.txt` → wklej do Vercel `COMFYUI_URL`. Opcjonalnie `install-startup-shortcut.ps1` (folder Startup). Szczegóły: `scripts/legion/README.md`.
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
 - **Pipeline:** patrz §6 — awaited `after()` + GET advance + durable JSON; flaga Legion opcjonalna/eksperymentalna.
 
@@ -134,7 +135,9 @@ Endpointy:
 | Objaw | Co sprawdzić |
 |-------|----------------|
 | Offline na pulpicie | ComfyUI uruchomione? `COMFYUI_URL`? firewall / tunel? |
-| Galeria pusta | zdalnie: tunel + `/history` lub `python scripts/seed-comfy-gallery-index.py` (indeks w input/); lokalnie: `COMFYUI_OUTPUT_DIR` |
+| Galeria pusta | zdalnie: tunel + indeks (`seed-comfy-gallery-index.py`) / `/history`; lokalnie: `COMFYUI_OUTPUT_DIR` |
+| `Galeria Comfy: … fetch failed → host` | Vercel `COMFYUI_URL` nie żyje (stary Quick Tunnel). Odczytaj `logs/cloudflared-tunnel-url.txt`, zaktualizuj ENV, redeploy. Preferuj Named Tunnel. |
+| `historia`/`internal/files` fail, ale galeria działa | OK — UI idzie z indeksu; flaky endpointy są pomijane gdy indeks ma wpisy |
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
 | Fast bez przyspieszenia | brak LoRA lightx2v w `loras/` — fallback klasyczny Fast |
