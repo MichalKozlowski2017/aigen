@@ -137,4 +137,21 @@ assertIsSvd("svd_real_mismatch", {
   console.log(`OK  wan_clip_mismatch → [${f.code}] ${f.message.slice(0, 100)}`);
 }
 
+// CUDA no-kernel (real Wan 2.2 MoE failure on Legion history) — not SVD
+{
+  const f = friendlyComfyError(
+    {
+      exception_type: "torch.AcceleratorError",
+      exception_message:
+        "CUDA error: no kernel image is available for execution on the device\nSearch for `cudaErrorNoKernelImageForDevice'",
+      node_id: "61",
+      node_type: "KSamplerAdvanced",
+    },
+    { engine: "wan" }
+  );
+  assert(f.code === "cuda_no_kernel_image", `cuda code=${f.code}`);
+  assert(!/ImageOnlyCheckpointLoader|SVD wymaga/i.test(f.message), "cuda no SVD");
+  console.log(`OK  cuda_no_kernel → [${f.code}] ${f.message.slice(0, 100)}`);
+}
+
 console.log("\nsmoke-comfy-errors: all passed");
