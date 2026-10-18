@@ -4,7 +4,7 @@
  * i tak złapie kolejny event progress przy ensureLiveProgressFeed().
  */
 
-import { getComfyUrl } from "./config";
+import { getComfyUrlAsync } from "./config";
 
 export type LiveComfyProgress = {
   promptId: string;
@@ -28,8 +28,8 @@ let connectPromise: Promise<void> | null = null;
 let lastMessageAt = 0;
 const CLIENT_ID = `aigen-progress-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 
-function wsUrl(): string {
-  const base = getComfyUrl().replace(/\/$/, "");
+async function wsUrl(): Promise<string> {
+  const base = (await getComfyUrlAsync()).replace(/\/$/, "");
   const u = new URL(base);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   // Zachowaj ścieżkę bazową jeśli tunel ma prefix; typowo root.
@@ -93,10 +93,10 @@ function attachHandlers(socket: WebSocket): void {
   });
 }
 
-function openSocket(): Promise<void> {
+async function openSocket(): Promise<void> {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-    if (ws.readyState === WebSocket.OPEN) return Promise.resolve();
-    return new Promise((resolve, reject) => {
+    if (ws.readyState === WebSocket.OPEN) return;
+    await new Promise<void>((resolve, reject) => {
       const s = ws!;
       const onOpen = () => {
         cleanup();
@@ -113,12 +113,14 @@ function openSocket(): Promise<void> {
       s.addEventListener("open", onOpen);
       s.addEventListener("error", onErr);
     });
+    return;
   }
 
-  return new Promise((resolve, reject) => {
+  const url = await wsUrl();
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
     try {
-      const socket = new WebSocket(wsUrl());
+      const socket = new WebSocket(url);
       ws = socket;
       attachHandlers(socket);
       const timer = setTimeout(() => {

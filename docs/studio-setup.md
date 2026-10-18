@@ -48,16 +48,20 @@ COMFYUI_OUTPUT_DIR=C:\ścieżka\do\ComfyUI\output
 Na Vercel ustaw:
 
 ```env
-# Named Tunnel (zalecane) — stały hostname; Quick Tunnel zmienia się po restarcie
+# Named Tunnel (gdy jest domena) — stały hostname
 COMFYUI_URL=https://comfy.your-domain.com
 STUDIO_PASSWORD=...
+# Bez domeny (Quick Tunnel auto-sync):
+# COMFY_URL_UPDATE_SECRET=...
+# KV_REST_API_URL=...   # opcjonalnie, trwały override
+# KV_REST_API_TOKEN=...
 # PIPELINE_LEGION_WORKER — zostaw wyłączone (patrz §6). Nie włączać domyślnie.
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
 - **Galeria (index-first):** najpierw trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe `/history` po reboocie), potem opcjonalnie `/history` + stock `/internal/files/output` (tylko gdy indeks pusty/skąpy; `/internal/files` nie rekuruje `studio/`). Proxy plików: `/api/comfy-view`. Po restarcie z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
-- **Autostart Legion:** jeden skrypt `scripts/legion/start-comfy-stack.ps1` (Comfy + Quick Tunnel + queue worker). URL Quick → `logs/cloudflared-tunnel-url.txt` → wklej do Vercel `COMFYUI_URL`. Opcjonalnie `install-startup-shortcut.ps1` (folder Startup). Szczegóły: `scripts/legion/README.md`.
-- **Named Tunnel (zalecane):** stały `COMFYUI_URL` bez aktualizacji po reboocie — [docs/named-cloudflare-tunnel.md](named-cloudflare-tunnel.md).
+- **Autostart Legion:** `scripts/legion/start-comfy-stack.ps1` (Comfy + Quick Tunnel + queue worker). Bez domeny: `AIGEN_PANEL_URL` + `COMFY_URL_UPDATE_SECRET` → auto `publish-comfy-url.ps1`. Opcjonalnie `install-startup-shortcut.ps1`. Szczegóły: `scripts/legion/README.md`.
+- **Named Tunnel / Quick auto-sync:** [docs/named-cloudflare-tunnel.md](named-cloudflare-tunnel.md).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
 - **Pipeline:** patrz §6 — awaited `after()` + GET advance + durable JSON; flaga Legion opcjonalna/eksperymentalna.
 

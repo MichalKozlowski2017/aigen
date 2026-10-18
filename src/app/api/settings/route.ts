@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
-import { getStudioPublicConfig } from "@/lib/studio/config";
+import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +10,6 @@ export async function GET() {
 
   return NextResponse.json({
     ok: true,
-    config: getStudioPublicConfig(),
+    config: await getStudioPublicConfigAsync(),
   });
 }

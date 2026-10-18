@@ -1,9 +1,9 @@
-import { getStudioPublicConfig } from "@/lib/studio/config";
+import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 
 export const dynamic = "force-dynamic";
 
-export default function StudioSettingsPage() {
-  const config = getStudioPublicConfig();
+export default async function StudioSettingsPage() {
+  const config = await getStudioPublicConfigAsync();
 
   const modelsDirValue = config.modelsDir
     ? config.modelsDir
@@ -64,11 +64,11 @@ export default function StudioSettingsPage() {
         </p>
         {config.comfyRemote ? (
           <p className="max-w-2xl text-sm text-stone-500">
-            Quick Tunnel (<code className="text-stone-400">*.trycloudflare.com</code>){" "}
-            zmienia hostname po restarcie — użyj{" "}
-            <span className="text-stone-400">Named Tunnel</span> dla stałego URL
-            (np. <code className="text-stone-400">https://comfy.your-domain.com</code>
-            ). Ops: <code className="text-stone-400">docs/named-cloudflare-tunnel.md</code>.
+            Bez domeny: auto-publish z Legionu —{" "}
+            <code className="text-stone-400">scripts/legion/publish-comfy-url.ps1</code>{" "}
+            → <code className="text-stone-400">POST /api/settings/comfy-url</code>{" "}
+            (sekret <code className="text-stone-400">COMFY_URL_UPDATE_SECRET</code>
+            ). Po restarcie Quick Tunnel URL aktualizuje się bez ręcznych Settings.
           </p>
         ) : null}
       </header>

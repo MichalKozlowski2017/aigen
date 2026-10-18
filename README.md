@@ -43,9 +43,9 @@ Panel możesz hostować na **Vercel**, a **ComfyUI** trzymać na stacjonarnym PC
 2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`. **Nie** ustawiaj `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` na Vercel — panel czyta modele (`/models/…`) i galerię (indeks `aigen-gallery-index.json` + historia) przez tunel.
 3. Deploy — zdalny dostęp do panelu; generacja działa, gdy Legion, tunel i ComfyUI są online.
 
-**Quick Tunnel** (`*.trycloudflare.com`) zmienia hostname po restarcie — zaktualizuj Vercel `COMFYUI_URL` z `logs/cloudflared-tunnel-url.txt`.
+**Quick Tunnel** (`*.trycloudflare.com`) zmienia hostname po restarcie — bez domeny użyj auto-publish: [`scripts/legion/publish-comfy-url.ps1`](scripts/legion/publish-comfy-url.ps1) → `POST /api/settings/comfy-url` (sekret `COMFY_URL_UPDATE_SECRET`). Szczegóły: [docs/named-cloudflare-tunnel.md](docs/named-cloudflare-tunnel.md#bez-domeny-auto-sync-quick-tunnel).
 
-**Named Tunnel** (zalecane): stały hostname, `COMFYUI_URL` raz — [docs/named-cloudflare-tunnel.md](docs/named-cloudflare-tunnel.md). Placeholder: `https://comfy.your-domain.com`.
+**Named Tunnel** (zalecane gdy jest domena): stały hostname, `COMFYUI_URL` raz — [docs/named-cloudflare-tunnel.md](docs/named-cloudflare-tunnel.md). Placeholder: `https://comfy.your-domain.com`.
 
 Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 
@@ -53,7 +53,9 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 
 | Zmienna | Opis |
 |---------|------|
-| `COMFYUI_URL` | Adres API ComfyUI — lokalnie `http://127.0.0.1:8188`; na Vercel URL tunelu (Named = stały, Quick = zmienia się) |
+| `COMFYUI_URL` | Adres API ComfyUI — lokalnie `http://127.0.0.1:8188`; na Vercel URL tunelu (Named = stały, Quick = override z auto-publish) |
+| `COMFY_URL_UPDATE_SECRET` | Bearer dla `POST /api/settings/comfy-url` (Legion auto-publish). Alternatywa: `REVALIDATE_SECRET` |
+| `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Opcjonalnie Vercel KV — trwały override Quick Tunnel bez redeploy |
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel: `/history` + indeks w Comfy input |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |

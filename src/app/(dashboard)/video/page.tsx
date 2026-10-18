@@ -1,5 +1,5 @@
 import { GenerateForm } from "@/components/studio/generate-form";
-import { getStudioPublicConfig } from "@/lib/studio/config";
+import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 import {
   listInstalledCheckpoints,
   listInstalledDiffusionModels,
@@ -20,7 +20,7 @@ export default async function StudioVideoPage() {
     listInstalledCheckpoints(),
     listInstalledDiffusionModels(),
   ]);
-  const { comfyUrl } = getStudioPublicConfig();
+  const { comfyUrl } = await getStudioPublicConfigAsync();
   const hasWan = diffusionModels.some((c) => c.toLowerCase().includes("wan"));
   const hasLtx = checkpoints.some((c) => c.toLowerCase().includes("ltx"));
   const hasSvd = checkpoints.some((c) => c.toLowerCase().includes("svd"));

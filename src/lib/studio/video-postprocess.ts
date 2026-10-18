@@ -11,7 +11,7 @@ import {
   fetchComfyViewBlob,
   getJobStatus,
 } from "./comfy-client";
-import { getComfyUrl } from "./config";
+import { getComfyUrlAsync } from "./config";
 import type { MediaRef } from "./video-outputs";
 
 export const DEFAULT_RIFE_CKPT = "rife47.pth";
@@ -128,7 +128,7 @@ async function uploadVideoBuffer(
   form.append("type", type);
   if (subfolder) form.append("subfolder", subfolder);
 
-  const base = getComfyUrl().replace(/\/$/, "");
+  const base = (await getComfyUrlAsync()).replace(/\/$/, "");
   const res = await fetch(`${base}/upload/image`, {
     method: "POST",
     body: form,

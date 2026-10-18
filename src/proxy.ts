@@ -9,6 +9,8 @@ const PUBLIC_PATHS = new Set([
   "/login",
   "/api/auth/login",
   "/api/auth/logout",
+  /** Legion publish — własny Bearer (COMFY_URL_UPDATE_SECRET), bez cookie sesji. */
+  "/api/settings/comfy-url",
 ]);
 
 /**
