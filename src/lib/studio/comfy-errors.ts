@@ -103,6 +103,17 @@ function looksLikeUpscaleMissing(blob: string): boolean {
   );
 }
 
+/** Legion / PyTorch bez kerneli dla GPU (np. sm_120) — częste na Wan 2.2 MoE. */
+function looksLikeCudaNoKernelImage(blob: string): boolean {
+  return (
+    /cudaErrorNoKernelImageForDevice|no kernel image is available for execution on the device/i.test(
+      blob
+    ) ||
+    (/AcceleratorError|CUDA error/i.test(blob) &&
+      /no kernel image|kernel image is available/i.test(blob))
+  );
+}
+
 /** Wyciąga czytelne linie z node_errors Comfy. */
 export function summarizeNodeErrors(nodeErrors: unknown): string {
   if (!nodeErrors || typeof nodeErrors !== "object") return "";
@@ -271,6 +282,19 @@ export function friendlyComfyError(
       code: "missing_upscale",
       message: "Brak modelu / node’ów upscale (RealESRGAN) na ComfyUI.",
       hint: "Zainstaluj UpscaleModelLoader + RealESRGAN_x2plus.pth, albo wyłącz postUpscale.",
+    });
+  }
+
+  if (looksLikeCudaNoKernelImage(blob)) {
+    const dumpHint = dump ? `\n${dump}` : "";
+    return wrap({
+      code: "cuda_no_kernel_image",
+      message:
+        "CUDA: brak kernela dla tej karty (no kernel image / cudaErrorNoKernelImageForDevice) — PyTorch na Legionie nie obsługuje architektury GPU.",
+      hint:
+        "Wan 2.2 MoE pada na KSamplerAdvanced (low). Zaktualizuj PyTorch/Comfy pod GPU (np. sm_120), albo tymczasowo Fast = Wan 2.1. To nie jest błąd ImageOnlyCheckpointLoader/SVD." +
+        dumpHint,
+      details: dump || undefined,
     });
   }
 
