@@ -125,7 +125,7 @@ Flux + Wan łącznie ~**73 GB** wag vs ~**64 GB** RAM Legion — przełączanie 
 
 Studio **preferuje Wan 2.2 Fast MoE** gdy wykryje high+low UNET **i** lightx2v LoRA pair (albo fused distill UNETs). Inaczej → Wan 2.1 Fast + LoRA 480p. **Nie pobieraj multi-GB na cloud VM.**
 
-Graph: 2× `UNETLoader` → `LoraLoaderModelOnly` (high/low) → `ModelSamplingSD3` (shift **5**) → opcjonalnie `PathchSageAttentionKJ` → `KSamplerAdvanced` high (0→2) → low (2→100) → decode. **Steps 4 · CFG=1 · euler/simple.** Geometria Fast: 832×480 / 480×832 (portrait z #24).
+Graph: 2× `UNETLoader` → `LoraLoaderModelOnly` (high/low) → opcjonalnie `PathchSageAttentionKJ` → `ModelSamplingSD3` (shift **5**) → `KSamplerAdvanced` high (0→2) → low (2→4) → decode. **Steps 4 · CFG=1 · euler/simple.** Geometria Fast: 832×480 / 480×832 (portrait z #24). Chunk continue: `ImageFromBatch` z `length = frames - overlap` (≥1; nigdy `-1`).
 
 Filenames (Legion SoT → `diffusion_models/` / `loras/`):
 
