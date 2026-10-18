@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { ThemeScript } from "@/components/studio/theme-script";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,8 +17,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pl" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-[#071210] text-stone-100">
+    <html
+      lang="pl"
+      className="h-full antialiased"
+      data-theme="light"
+      suppressHydrationWarning
+    >
+      <body className="flex min-h-full flex-col bg-background text-foreground">
+        <ThemeScript />
         {children}
       </body>
     </html>

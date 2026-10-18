@@ -111,13 +111,13 @@ export function ModelsClient({
         <button
           type="button"
           onClick={() => void refresh()}
-          className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-stone-300 hover:border-teal-400/40 hover:text-teal-100"
+          className="rounded-lg border border-studio-border px-3 py-1.5 text-sm text-stone-300 hover:border-teal-400/40 hover:text-teal-100"
         >
           Odśwież listę
         </button>
       </div>
 
-      <ul className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
+      <ul className="divide-y divide-studio-border border-y border-studio-border">
         {items.map((item) => {
           const job =
             (item.downloadJobId && jobs[item.downloadJobId]) ||
@@ -140,7 +140,7 @@ export function ModelsClient({
                 </p>
                 <p className="text-sm text-stone-500">{item.notes}</p>
                 {item.status === "downloading" && percent != null ? (
-                  <div className="mt-2 h-1.5 max-w-xs overflow-hidden rounded-full bg-white/10">
+                  <div className="mt-2 h-1.5 max-w-xs overflow-hidden rounded-full bg-studio-track">
                     <div
                       className="h-full bg-teal-400 transition-all"
                       style={{ width: `${percent}%` }}
@@ -158,7 +158,7 @@ export function ModelsClient({
                     type="button"
                     disabled={busyId === item.id || item.status === "downloading"}
                     onClick={() => void startDownload(item.id)}
-                    className="rounded-lg bg-teal-400/90 px-3 py-1.5 text-sm font-semibold text-[#04201a] disabled:opacity-50"
+                    className="rounded-lg bg-teal-400/90 px-3 py-1.5 text-sm font-semibold text-studio-cta-fg disabled:opacity-50"
                   >
                     Pobierz
                   </button>
@@ -181,7 +181,7 @@ function StatusPill({ status }: { status: ModelLibraryItem["status"] }) {
   } as const;
   const colors = {
     ready: "text-teal-200 bg-teal-400/10",
-    missing: "text-stone-300 bg-white/5",
+    missing: "text-stone-300 bg-studio-surface",
     downloading: "text-amber-100 bg-amber-500/10",
     error: "text-rose-200 bg-rose-500/10",
   } as const;

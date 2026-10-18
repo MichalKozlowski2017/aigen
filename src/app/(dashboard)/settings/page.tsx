@@ -73,7 +73,7 @@ export default async function StudioSettingsPage() {
         ) : null}
       </header>
 
-      <dl className="divide-y divide-white/[0.06] border-y border-white/[0.06]">
+      <dl className="divide-y divide-studio-border border-y border-studio-border">
         {rows.map((row) => (
           <div
             key={row.label}

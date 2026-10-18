@@ -75,10 +75,10 @@ export function GalleryClient({
               type="button"
               onClick={() => setKind(k)}
               className={[
-                "rounded-md px-3 py-1.5 text-sm transition",
+                "inline-flex min-h-11 items-center rounded-md px-3.5 py-2 text-sm font-semibold transition",
                 kind === k
-                  ? "bg-teal-400/15 text-teal-100"
-                  : "text-stone-400 hover:bg-white/[0.04]",
+                  ? "bg-teal-400/15 text-teal-100 ring-1 ring-studio-border-strong"
+                  : "text-stone-400 hover:bg-studio-surface-hover hover:text-stone-100",
               ].join(" ")}
             >
               {k === "all" ? "Wszystko" : k === "image" ? "Obrazy" : "Wideo"}
@@ -115,7 +115,7 @@ export function GalleryClient({
           return (
             <li
               key={item.id}
-              className="studio-fade-in overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02]"
+              className="studio-fade-in overflow-hidden rounded-xl border border-studio-border bg-studio-surface"
             >
               {item.kind === "video" ? (
                 <video
@@ -124,7 +124,7 @@ export function GalleryClient({
                   controls
                   playsInline
                   preload="metadata"
-                  className="aspect-video w-full bg-black/50"
+                  className="aspect-video w-full bg-studio-media"
                 >
                   <a href={item.url}>Otwórz wideo</a>
                 </video>
@@ -154,7 +154,7 @@ export function GalleryClient({
                     type="button"
                     onClick={() => void downloadItem(item)}
                     disabled={downloadBusy === item.id}
-                    className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-1 text-xs text-stone-200 transition hover:border-teal-400/40 hover:text-teal-100 disabled:opacity-50"
+                    className="inline-flex min-h-11 items-center rounded-md border border-studio-border bg-studio-surface-hover px-3 py-2 text-sm font-medium text-stone-200 transition hover:border-teal-400/40 hover:text-teal-100 disabled:opacity-50"
                   >
                     {downloadBusy === item.id ? "Pobieram…" : "Pobierz"}
                   </button>
@@ -162,7 +162,7 @@ export function GalleryClient({
                     href={item.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="rounded-md border border-white/10 px-2.5 py-1 text-xs text-stone-400 transition hover:border-white/20 hover:text-stone-200"
+                    className="inline-flex min-h-11 items-center rounded-md border border-studio-border px-3 py-2 text-sm font-medium text-stone-400 transition hover:border-studio-border-strong hover:text-stone-200"
                   >
                     Otwórz
                   </a>

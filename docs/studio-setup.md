@@ -84,6 +84,8 @@ npm run dev
 
 Otwórz `http://localhost:3000`.
 
+**Motyw panelu:** domyślnie **jasny** (czytelny na iPhonie w słońcu) — przełącznik Jasny/Ciemny w nagłówku; wybór w `localStorage` (`aigen-theme`).
+
 Jeśli ComfyUI nie działa, pulpit pokazuje **offline** — API zwraca 503 przy generacji, reszta UI działa.
 
 ## 4. Modele
