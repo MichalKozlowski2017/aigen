@@ -32,7 +32,18 @@ import {
   snapWanLength,
   type VideoEngineId,
 } from "./video-engines";
-import { detectWan22Availability } from "./wan22";
+import {
+  detectWan22Availability,
+  WAN22_FAST_CFG,
+  WAN22_FAST_HIGH_END_STEP,
+  WAN22_FAST_LORA_STRENGTH,
+  WAN22_FAST_LOW_END_STEP,
+  WAN22_FAST_SAMPLER,
+  WAN22_FAST_SCHEDULER,
+  WAN22_FAST_SHIFT,
+  WAN22_FAST_STEPS,
+  type Wan22Detect,
+} from "./wan22";
 import { LTX_CHUNK_OVERLAP, planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
 import { WAN_CHUNK_OVERLAP, planWanChunks } from "./wan-chunks";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
@@ -82,10 +93,17 @@ export {
   detectWan22Availability,
   WAN22_I2V_HIGH_NOISE_FP8,
   WAN22_I2V_LOW_NOISE_FP8,
+  WAN22_I2V_HIGH_NOISE_FP8_FUSED,
+  WAN22_I2V_LOW_NOISE_FP8_FUSED,
   WAN22_LIGHTX2V_LORA_HIGH,
   WAN22_LIGHTX2V_LORA_LOW,
   WAN22_HF_DISTILL,
   WAN22_HF_COMFY_ORG,
+  WAN22_FAST_STEPS,
+  WAN22_FAST_CFG,
+  WAN22_FAST_SAMPLER,
+  WAN22_FAST_SCHEDULER,
+  WAN22_FAST_SHIFT,
   type Wan22Detect,
 } from "./wan22";
 
@@ -537,9 +555,10 @@ function buildSvdVideoWorkflow(body: GenerateBody): WorkflowGraph {
 }
 
 /**
- * Wan 2.1 I2V — UNETLoader (FP8) + opcjonalnie LoraLoaderModelOnly (lightx2v)
- * + CLIPLoader(type=wan) + CLIPVision + WanImageToVideo + ModelSamplingSD3
- * + KSampler + VHS. Opcjonalnie CodeFormer; opcjonalnie last-frame (chunk continue).
+ * Wan I2V — Fast preferuje Wan 2.2 MoE (high+low + lightx2v 4-step) gdy
+ * pliki na Comfy; inaczej Wan 2.1 UNET + opcjonalnie LoRA distill.
+ * CLIPLoader(type=wan) + CLIPVision + WanImageToVideo + ModelSamplingSD3
+ * + KSampler(/Advanced) + VHS. Opcjonalnie CodeFormer; last-frame (chunk).
  */
 async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
   workflow: WorkflowGraph;
@@ -560,6 +579,7 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       wantsWanDistill(body.qualityPreset));
 
   // Fast + lightx2v = tylko 480p (nie mieszaj UNET 720p z LoRA 480p)
+  // Portrait-aware: 832×480 / 480×832 (#24)
   const geo = coerceWanFast480pGeometry({
     qualityPreset: body.qualityPreset,
     wanDistillLora: body.wanDistillLora,
@@ -621,38 +641,59 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
     preset?.scheduler ??
     (wantDistill ? WAN_DISTILL_SCHEDULER : WAN_FAST_NO_LORA_SCHEDULER);
 
+  let usedWan22Moe = false;
+
   if (wantDistill) {
-    const distill = await resolveWanDistillLora();
-    if (distill.attach && distill.loraName) {
-      spliceWanDistillLora(graph, distill.loraName);
-      // LoRA aktywna: twardy lock — API/UI nie nadpiszą cfg=6 ani steps poza 4–8
-      steps = clampWanDistillSteps(body.steps ?? WAN_DISTILL_STEPS);
-      cfg = WAN_DISTILL_CFG;
-      samplerName = WAN_DISTILL_SAMPLER;
-      scheduler = WAN_DISTILL_SCHEDULER;
+    // Prefer Wan 2.2 Fast MoE when high+low (+ LoRA / fused) present
+    let w22: Wan22Detect | null = null;
+    try {
+      w22 = await detectWan22Availability();
+    } catch {
+      w22 = null;
+    }
+
+    if (w22?.fastMoeReady && w22.highNoise && w22.lowNoise) {
+      const sage = await resolveWanSageAttentionNode();
+      applyWan22FastMoeGraph(graph, {
+        highNoise: w22.highNoise,
+        lowNoise: w22.lowNoise,
+        loraHigh: w22.loraHigh,
+        loraLow: w22.loraLow,
+        seed,
+        sage: sage.available,
+      });
+      usedWan22Moe = true;
+      steps = WAN22_FAST_STEPS;
+      cfg = WAN22_FAST_CFG;
+      samplerName = WAN22_FAST_SAMPLER;
+      scheduler = WAN22_FAST_SCHEDULER;
+      if (chunkIdx === 0) {
+        warnings.push(w22.note);
+      }
     } else {
-      if (distill.warning) warnings.push(distill.warning);
-      // Graceful: bez LoRA — klasyczny Fast (ignoruj distill steps/CFG z UI)
-      steps = WAN_FAST_NO_LORA_STEPS;
-      cfg = WAN_FAST_NO_LORA_CFG;
-      samplerName = WAN_FAST_NO_LORA_SAMPLER;
-      scheduler = WAN_FAST_NO_LORA_SCHEDULER;
-    }
-    // Fast: Patch Sage Attention KJ gdy dostępny (nie CLI --use-sage-attention)
-    const sage = await resolveWanSageAttentionNode();
-    if (sage.available) {
-      spliceWanSageAttention(graph);
-    }
-    // Brak KJNodes / offline — graceful skip (bez warning spam na każdy chunk)
-    // Wan 2.2: detect only (MoE graph not wired) — once per build, soft note
-    if (chunkIdx === 0) {
-      try {
-        const w22 = await detectWan22Availability();
-        if (w22.available) {
-          warnings.push(w22.note);
-        }
-      } catch {
-        /* offline — ignore */
+      const distill = await resolveWanDistillLora();
+      if (distill.attach && distill.loraName) {
+        spliceWanDistillLora(graph, distill.loraName);
+        // LoRA aktywna: twardy lock — API/UI nie nadpiszą cfg=6 ani steps poza 4–8
+        steps = clampWanDistillSteps(body.steps ?? WAN_DISTILL_STEPS);
+        cfg = WAN_DISTILL_CFG;
+        samplerName = WAN_DISTILL_SAMPLER;
+        scheduler = WAN_DISTILL_SCHEDULER;
+      } else {
+        if (distill.warning) warnings.push(distill.warning);
+        // Graceful: bez LoRA — klasyczny Fast (ignoruj distill steps/CFG z UI)
+        steps = WAN_FAST_NO_LORA_STEPS;
+        cfg = WAN_FAST_NO_LORA_CFG;
+        samplerName = WAN_FAST_NO_LORA_SAMPLER;
+        scheduler = WAN_FAST_NO_LORA_SCHEDULER;
+      }
+      // Fast 2.1: Patch Sage Attention KJ gdy dostępny (nie CLI --use-sage-attention)
+      const sage = await resolveWanSageAttentionNode();
+      if (sage.available) {
+        spliceWanSageAttention(graph);
+      }
+      if (chunkIdx === 0 && w22?.available && w22.usingFallback21) {
+        warnings.push(w22.note);
       }
     }
   } else {
@@ -662,10 +703,12 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
     scheduler = preset?.scheduler ?? "simple";
   }
 
-  graph["3"].inputs.steps = steps;
-  graph["3"].inputs.cfg = cfg;
-  graph["3"].inputs.sampler_name = samplerName;
-  graph["3"].inputs.scheduler = scheduler;
+  if (!usedWan22Moe) {
+    graph["3"].inputs.steps = steps;
+    graph["3"].inputs.cfg = cfg;
+    graph["3"].inputs.sampler_name = samplerName;
+    graph["3"].inputs.scheduler = scheduler;
+  }
   graph["21"].inputs.frame_rate = plan.fps;
   graph["21"].inputs.filename_prefix = prefix;
 
@@ -700,6 +743,147 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
   }
 
   return { workflow: graph, warnings };
+}
+
+/**
+ * Wan 2.2 Fast MoE — dual UNET (high/low) + optional lightx2v LoRAs +
+ * ModelSamplingSD3(shift=5) + optional Sage KJ + 2× KSamplerAdvanced.
+ * High: steps 0→2 of 4, leftover noise. Low: 2→100, no add noise.
+ * VAEDecode czyta z low sampler (61).
+ */
+function applyWan22FastMoeGraph(
+  graph: WorkflowGraph,
+  opts: {
+    highNoise: string;
+    lowNoise: string;
+    loraHigh: string | null;
+    loraLow: string | null;
+    seed: number;
+    sage: boolean;
+  }
+): void {
+  graph["37"] = {
+    class_type: "UNETLoader",
+    inputs: {
+      unet_name: opts.highNoise,
+      weight_dtype: "default",
+    },
+  };
+  graph["57"] = {
+    class_type: "UNETLoader",
+    inputs: {
+      unet_name: opts.lowNoise,
+      weight_dtype: "default",
+    },
+  };
+
+  let highModel: [string, number] = ["37", 0];
+  let lowModel: [string, number] = ["57", 0];
+
+  if (opts.loraHigh && opts.loraLow) {
+    graph["55"] = {
+      class_type: "LoraLoaderModelOnly",
+      inputs: {
+        model: highModel,
+        lora_name: opts.loraHigh,
+        strength_model: WAN22_FAST_LORA_STRENGTH,
+      },
+    };
+    graph["58"] = {
+      class_type: "LoraLoaderModelOnly",
+      inputs: {
+        model: lowModel,
+        lora_name: opts.loraLow,
+        strength_model: WAN22_FAST_LORA_STRENGTH,
+      },
+    };
+    highModel = ["55", 0];
+    lowModel = ["58", 0];
+  } else {
+    delete graph["55"];
+  }
+
+  graph["54"] = {
+    class_type: "ModelSamplingSD3",
+    inputs: {
+      model: highModel,
+      shift: WAN22_FAST_SHIFT,
+    },
+  };
+  graph["60"] = {
+    class_type: "ModelSamplingSD3",
+    inputs: {
+      model: lowModel,
+      shift: WAN22_FAST_SHIFT,
+    },
+  };
+  highModel = ["54", 0];
+  lowModel = ["60", 0];
+
+  if (opts.sage) {
+    graph["56"] = {
+      class_type: WAN_SAGE_NODE_CLASS,
+      inputs: {
+        model: highModel,
+        sage_attention: WAN_SAGE_ATTENTION_MODE,
+        allow_compile: false,
+      },
+    };
+    graph["59"] = {
+      class_type: WAN_SAGE_NODE_CLASS,
+      inputs: {
+        model: lowModel,
+        sage_attention: WAN_SAGE_ATTENTION_MODE,
+        allow_compile: false,
+      },
+    };
+    highModel = ["56", 0];
+    lowModel = ["59", 0];
+  } else {
+    delete graph["56"];
+  }
+
+  graph["3"] = {
+    class_type: "KSamplerAdvanced",
+    inputs: {
+      add_noise: "enable",
+      noise_seed: opts.seed,
+      steps: WAN22_FAST_STEPS,
+      cfg: WAN22_FAST_CFG,
+      sampler_name: WAN22_FAST_SAMPLER,
+      scheduler: WAN22_FAST_SCHEDULER,
+      start_at_step: 0,
+      end_at_step: WAN22_FAST_HIGH_END_STEP,
+      return_with_leftover_noise: "enable",
+      model: highModel,
+      positive: ["50", 0],
+      negative: ["50", 1],
+      latent_image: ["50", 2],
+    },
+  };
+
+  graph["61"] = {
+    class_type: "KSamplerAdvanced",
+    inputs: {
+      add_noise: "disable",
+      noise_seed: opts.seed,
+      steps: WAN22_FAST_STEPS,
+      cfg: WAN22_FAST_CFG,
+      sampler_name: WAN22_FAST_SAMPLER,
+      scheduler: WAN22_FAST_SCHEDULER,
+      start_at_step: WAN22_FAST_HIGH_END_STEP,
+      end_at_step: WAN22_FAST_LOW_END_STEP,
+      return_with_leftover_noise: "disable",
+      model: lowModel,
+      positive: ["50", 0],
+      negative: ["50", 1],
+      latent_image: ["3", 0],
+    },
+  };
+
+  if (graph["8"]) {
+    graph["8"].inputs.samples = ["61", 0];
+  }
 }
 
 /** UNET (37) → LoraLoaderModelOnly (55) → ModelSamplingSD3 (54). */

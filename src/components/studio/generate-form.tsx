@@ -1097,7 +1097,8 @@ export function GenerateForm({
                   </span>
                   {" — "}
                   <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
-                  = distill LoRA lightx2v (steps {WAN_DISTILL_STEPS_MIN}–
+                  = Wan 2.2 MoE (high+low + lightx2v 4-step) gdy wagi na Comfy,
+                  inaczej Wan 2.1 distill LoRA (steps {WAN_DISTILL_STEPS_MIN}–
                   {WAN_DISTILL_STEPS_MAX} · CFG=1 · euler · tylko 480p). Quality
                   720p = bez LoRA. 24 fps: preferuj Smooth 24 (RIFE); Native 24 =
                   experimental.

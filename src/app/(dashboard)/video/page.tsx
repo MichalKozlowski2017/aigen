@@ -51,11 +51,14 @@ export default async function StudioVideoPage() {
         </h1>
         <p className="max-w-2xl text-stone-400">
           Domyślnie{" "}
-          <strong className="font-medium text-stone-300">Wan 2.1 I2V</strong>{" "}
-          —{" "}
-          <strong className="font-medium text-stone-300">Fast 480p</strong>{" "}
-          (chunki preferuj <strong className="font-medium text-stone-300">81</strong>
-          ). Zalecane vs native 720p:{" "}
+          <strong className="font-medium text-stone-300">Wan Fast 480p</strong>
+          {" "}
+          — preferuje{" "}
+          <strong className="font-medium text-stone-300">Wan 2.2 MoE</strong>{" "}
+          (high+low + lightx2v 4-step) gdy wagi na Comfy; inaczej Wan 2.1.
+          Chunki preferuj{" "}
+          <strong className="font-medium text-stone-300">81</strong>. Zalecane
+          vs native 720p:{" "}
           <strong className="font-medium text-stone-300">
             Fast + upscale/smooth
           </strong>{" "}
