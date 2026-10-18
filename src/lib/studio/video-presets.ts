@@ -1,6 +1,7 @@
 /**
  * Presety jakości Wan (panel Wideo).
- * Domyślny: Fast 480p = lightx2v distill LoRA (steps 4, CFG≈1, euler).
+ * Domyślny: Fast 480p = lightx2v distill LoRA (steps 4–8, CFG=1, euler).
+ * Fast zawsze 480p — nie mieszać z UNET 720p.
  * Smooth 24 = opcjonalny toggle RIFE (preferowany 24 fps vs Native 24).
  * Quality = bez LoRA / więcej steps. Native 24 = experimental.
  */
@@ -52,14 +53,14 @@ export type WanQualityPreset = {
 /** Domyślny preset panelu — Fast 480p + distill LoRA. */
 export const DEFAULT_WAN_QUALITY_PRESET: WanQualityPresetId = "fast-480p";
 
-/** Steps Fast z LoRA distill (4–6). */
+/** Steps Fast z LoRA distill (domyślnie 4; twardy zakres 4–8 w builderze). */
 export const DEFAULT_WAN_FAST_STEPS = WAN_DISTILL_STEPS;
 
 export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
   {
     id: "fast-480p",
     label: "Fast 480p",
-    blurb: "domyślny · distill LoRA · 832×480 · 16 fps · steps 4 · CFG 1 · euler",
+    blurb: "domyślny · distill LoRA · 832×480 · 16 fps · steps 4–8 · CFG 1 · euler",
     width: WAN_UI_LIMITS.defaultWidth,
     height: WAN_UI_LIMITS.defaultHeight,
     fps: 16,

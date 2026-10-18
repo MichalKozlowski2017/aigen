@@ -37,9 +37,11 @@ export function getStudioPassword(): string | null {
 }
 
 /**
- * true = Legion queue worker jest source of truth dla chunków.
- * Panel Vercel: GET tylko status (bez advance / bez after() kick).
- * Ustaw `PIPELINE_LEGION_WORKER=1` na Vercel gdy worker na Legionie orkiestruje.
+ * true = eksperymentalny tryb „Legion worker SoT” (panel GET bez advance).
+ * **Domyślnie wyłączone** — nie ustawiaj `PIPELINE_LEGION_WORKER=1` w produkcji
+ * bez świadomego protokołu (register nie ma osobnego auth poza STUDIO_PASSWORD).
+ * Niezależny skrypt `aigen-queue-worker.py` na Legionie (jeśli jest) to osobna
+ * ścieżka — nie wymaga tej flagi.
  */
 export function isPipelineLegionWorker(): boolean {
   const v = trimOrUndefined(process.env.PIPELINE_LEGION_WORKER)?.toLowerCase();

@@ -82,6 +82,10 @@ export {
 } from "./video-presets";
 export {
   WAN_DISTILL_LORA_FILENAME,
+  WAN_DISTILL_STEPS_MAX,
+  WAN_DISTILL_STEPS_MIN,
+  clampWanDistillSteps,
+  coerceWanFast480pGeometry,
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
@@ -95,6 +99,8 @@ import {
   WAN_FAST_NO_LORA_SAMPLER,
   WAN_FAST_NO_LORA_SCHEDULER,
   WAN_FAST_NO_LORA_STEPS,
+  clampWanDistillSteps,
+  coerceWanFast480pGeometry,
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
@@ -507,7 +513,27 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       ? Math.floor(Math.random() * 2_147_483_647)
       : body.seed;
 
-  const plan = planWanVideo(body);
+  const preset = getWanQualityPreset(body.qualityPreset);
+  const wantDistill =
+    body.wanDistillLora !== false &&
+    (body.wanDistillLora === true ||
+      preset?.useDistillLora === true ||
+      wantsWanDistill(body.qualityPreset));
+
+  // Fast + lightx2v = tylko 480p (nie mieszaj UNET 720p z LoRA 480p)
+  const geo = coerceWanFast480pGeometry({
+    qualityPreset: body.qualityPreset,
+    wanDistillLora: body.wanDistillLora,
+    width: body.width,
+    height: body.height,
+    model: body.model,
+  });
+  if (geo.warning) warnings.push(geo.warning);
+  const bodyForPlan: GenerateBody = geo.locked
+    ? { ...body, width: geo.width, height: geo.height, model: geo.model }
+    : body;
+
+  const plan = planWanVideo(bodyForPlan);
   const chunkLength =
     body.ltxChunkLength != null
       ? snapWanLength(body.ltxChunkLength)
@@ -516,19 +542,13 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
         : snapWanLength(plan.frames);
 
   const unet = resolveWanUnet({
-    model: body.model,
+    model: bodyForPlan.model,
     width: plan.width,
     height: plan.height,
   });
 
   const chunkIdx = body.ltxChunkIndex ?? 0;
   const prefix = `studio/video-wan-c${chunkIdx}`;
-  const preset = getWanQualityPreset(body.qualityPreset);
-  const wantDistill =
-    body.wanDistillLora !== false &&
-    (body.wanDistillLora === true ||
-      preset?.useDistillLora === true ||
-      wantsWanDistill(body.qualityPreset));
 
   graph["37"].inputs.unet_name = unet;
   graph["37"].inputs.weight_dtype = "default";
@@ -566,8 +586,9 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
     const distill = await resolveWanDistillLora();
     if (distill.attach && distill.loraName) {
       spliceWanDistillLora(graph, distill.loraName);
-      steps = body.steps ?? WAN_DISTILL_STEPS;
-      cfg = body.cfg ?? WAN_DISTILL_CFG;
+      // LoRA aktywna: twardy lock — API/UI nie nadpiszą cfg=6 ani steps poza 4–8
+      steps = clampWanDistillSteps(body.steps ?? WAN_DISTILL_STEPS);
+      cfg = WAN_DISTILL_CFG;
       samplerName = WAN_DISTILL_SAMPLER;
       scheduler = WAN_DISTILL_SCHEDULER;
     } else {

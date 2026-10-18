@@ -83,6 +83,10 @@ export async function stitchComfyClips(options: {
         src,
         "-c:v",
         "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "fast",
         "-pix_fmt",
         "yuv420p",
         "-an",
@@ -98,23 +102,44 @@ export async function stitchComfyClips(options: {
     );
 
     const stitched = path.join(tmp, "stitched.mp4");
-    await runFfmpeg([
-      "-y",
-      "-f",
-      "concat",
-      "-safe",
-      "0",
-      "-i",
-      listFile,
-      "-c:v",
-      "libx264",
-      "-pix_fmt",
-      "yuv420p",
-      "-an",
-      "-r",
-      String(fps),
-      stitched,
-    ]);
+    // Najpierw -c copy (szybko, bez generacji); fallback re-encode CRF 18
+    try {
+      await runFfmpeg([
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listFile,
+        "-c",
+        "copy",
+        "-an",
+        stitched,
+      ]);
+    } catch {
+      await runFfmpeg([
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        listFile,
+        "-c:v",
+        "libx264",
+        "-crf",
+        "18",
+        "-preset",
+        "fast",
+        "-pix_fmt",
+        "yuv420p",
+        "-an",
+        "-r",
+        String(fps),
+        stitched,
+      ]);
+    }
 
     const buf = await fs.readFile(stitched);
     const base =

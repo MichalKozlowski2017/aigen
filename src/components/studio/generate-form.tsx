@@ -39,6 +39,11 @@ import {
   DEFAULT_WAN_UNET_720P,
 } from "@/lib/studio/video-engines";
 import {
+  WAN_DISTILL_STEPS_MAX,
+  WAN_DISTILL_STEPS_MIN,
+  coerceWanFast480pGeometry,
+} from "@/lib/studio/wan-distill";
+import {
   mergeJobProgressWithWs,
   useComfyWsProgress,
 } from "@/components/studio/use-comfy-ws-progress";
@@ -202,10 +207,25 @@ export function GenerateForm({
   const wsOverlay = useComfyWsProgress(comfyUrl, promptId, wsEnabled);
   const displayProgress = mergeJobProgressWithWs(jobProgress, wsOverlay);
 
+  /** Fast / Smooth + lightx2v — UI+API: tylko 480p, CFG/steps lock na serwerze. */
+  const wanFastLocked =
+    kind === "video" &&
+    videoEngine === "wan" &&
+    (qualityPreset === "fast-480p" || qualityPreset === "smooth-24");
+
   const videoPlan =
     kind === "video"
       ? videoEngine === "wan"
-        ? planWanVideo({ width, height, fps, durationSec })
+        ? planWanVideo(
+            wanFastLocked
+              ? {
+                  width: WAN_UI_LIMITS.defaultWidth,
+                  height: WAN_UI_LIMITS.defaultHeight,
+                  fps,
+                  durationSec,
+                }
+              : { width, height, fps, durationSec }
+          )
         : videoEngine === "ltx"
           ? planLtxVideo({ width, height, fps, durationSec })
           : planSvdVideo({ width, height, fps, durationSec })
@@ -738,6 +758,25 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
+        const wanGeo =
+          kind === "video" && videoEngine === "wan"
+            ? coerceWanFast480pGeometry({
+                qualityPreset,
+                wanDistillLora:
+                  qualityPreset === "fast-480p" ||
+                  qualityPreset === "smooth-24",
+                width,
+                height,
+                model,
+              })
+            : null;
+        if (wanGeo?.warning) {
+          setPollWarning(wanGeo.warning);
+        }
+        const submitWidth = wanGeo?.locked ? wanGeo.width : width;
+        const submitHeight = wanGeo?.locked ? wanGeo.height : height;
+        const submitModel = wanGeo?.locked ? wanGeo.model : model;
+
         const baseBody: Record<string, unknown> = {
           kind,
           prompt,
@@ -745,15 +784,20 @@ export function GenerateForm({
             kind === "video"
               ? negativePrompt.trim() || DEFAULT_WAN_NEGATIVE
               : negativePrompt,
-          model,
-          width,
-          height,
+          model: submitModel,
+          width: submitWidth,
+          height: submitHeight,
           seed,
           batch: kind === "image" ? batch : 1,
           ...(kind === "video" && videoEngine === "wan"
             ? {
-                steps,
-                cfg,
+                steps: wanFastLocked
+                  ? Math.min(
+                      WAN_DISTILL_STEPS_MAX,
+                      Math.max(WAN_DISTILL_STEPS_MIN, steps)
+                    )
+                  : steps,
+                cfg: wanFastLocked ? 1 : cfg,
                 qualityPreset,
                 wanDistillLora:
                   qualityPreset === "fast-480p" ||
@@ -991,9 +1035,10 @@ export function GenerateForm({
                   </span>
                   {" — "}
                   <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
-                  = distill LoRA lightx2v (steps {DEFAULT_WAN_FAST_STEPS} · CFG≈1 ·
-                  euler). Quality = bez LoRA / więcej steps. 24 fps: preferuj
-                  Smooth 24 (RIFE); Native 24 = experimental.
+                  = distill LoRA lightx2v (steps {WAN_DISTILL_STEPS_MIN}–
+                  {WAN_DISTILL_STEPS_MAX} · CFG=1 · euler · tylko 480p). Quality
+                  720p = bez LoRA. 24 fps: preferuj Smooth 24 (RIFE); Native 24 =
+                  experimental.
                 </p>
               ) : null}
             </fieldset>
@@ -1360,7 +1405,11 @@ export function GenerateForm({
               className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
             />
           </Field>
-          <Field label="Szerokość">
+          <Field
+            label={
+              wanFastLocked ? "Szerokość (Fast = 480p)" : "Szerokość"
+            }
+          >
             <input
               type="number"
               min={256}
@@ -1374,12 +1423,17 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={width}
+              value={wanFastLocked ? WAN_UI_LIMITS.defaultWidth : width}
+              disabled={wanFastLocked}
               onChange={(e) => setWidth(Number(e.target.value))}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
-          <Field label="Wysokość">
+          <Field
+            label={
+              wanFastLocked ? "Wysokość (Fast = 480p)" : "Wysokość"
+            }
+          >
             <input
               type="number"
               min={256}
@@ -1393,9 +1447,10 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={height}
+              value={wanFastLocked ? WAN_UI_LIMITS.defaultHeight : height}
+              disabled={wanFastLocked}
               onChange={(e) => setHeight(Number(e.target.value))}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
           {kind === "image" ? (
@@ -1457,13 +1512,31 @@ export function GenerateForm({
                 </Field>
               )}
               {videoEngine === "wan" ? (
-                <Field label="Steps">
+                <Field
+                  label={
+                    wanFastLocked
+                      ? `Steps (LoRA ${WAN_DISTILL_STEPS_MIN}–${WAN_DISTILL_STEPS_MAX})`
+                      : "Steps"
+                  }
+                >
                   <input
                     type="number"
-                    min={4}
-                    max={40}
+                    min={wanFastLocked ? WAN_DISTILL_STEPS_MIN : 4}
+                    max={wanFastLocked ? WAN_DISTILL_STEPS_MAX : 40}
                     value={steps}
-                    onChange={(e) => setSteps(Number(e.target.value))}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      if (wanFastLocked) {
+                        setSteps(
+                          Math.min(
+                            WAN_DISTILL_STEPS_MAX,
+                            Math.max(WAN_DISTILL_STEPS_MIN, n)
+                          )
+                        );
+                      } else {
+                        setSteps(n);
+                      }
+                    }}
                     className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
                   />
                 </Field>

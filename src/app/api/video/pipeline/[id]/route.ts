@@ -17,9 +17,9 @@ export const maxDuration = 300;
 /**
  * GET status pipeline.
  *
- * - Domyślnie (Vercel best-effort): advance + rzadki after() kick.
- * - `PIPELINE_LEGION_WORKER=1`: tylko odczyt stanu — Legion worker jest SoT.
- * Browser poll NIE jest source of truth dla kolejnych chunków.
+ * - Domyślnie: advance + rzadki awaited after() kick (+ durable Comfy JSON).
+ * - `PIPELINE_LEGION_WORKER=1` (eksperymentalne, niezalecane domyślnie): tylko odczyt.
+ * Browser poll NIE jest jedynym źródłem postępu — advance działa też bez UI.
  */
 export async function GET(
   _request: Request,
@@ -63,8 +63,8 @@ export async function GET(
       pipeline.status !== "failed" &&
       shouldKickPipelineBackground(pipeline.id)
     ) {
-      after(() => {
-        kickPipelineBackground(pipeline.id, 180_000);
+      after(async () => {
+        await kickPipelineBackground(pipeline.id, 180_000);
       });
     }
 

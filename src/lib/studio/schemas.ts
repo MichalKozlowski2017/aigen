@@ -37,6 +37,8 @@ export const generateBodySchema = z.object({
   /**
    * Fast: lightx2v distill LoRA (LoraLoaderModelOnly) gdy plik na Comfy.
    * false = Quality / wymuś bez LoRA. true = wymuś próbę. undefined = z presetu.
+   * Gdy LoRA aktywna: serwer wymusza CFG=1, steps 4–8 i geometrię 480p
+   * (API cfg=6 / 720p nie nadpisze).
    */
   wanDistillLora: z.boolean().optional(),
   /** Po stitch: Comfy RIFE 16→24 (graceful jeśli node brak) */
