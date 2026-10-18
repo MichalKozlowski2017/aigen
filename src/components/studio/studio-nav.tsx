@@ -29,10 +29,10 @@ export function StudioNav() {
             key={link.href}
             href={link.href}
             className={[
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200",
+              "inline-flex min-h-11 items-center rounded-md px-3.5 py-2 text-sm font-semibold transition-colors duration-200",
               active
-                ? "bg-teal-400/15 text-teal-100"
-                : "text-stone-400 hover:bg-white/[0.04] hover:text-stone-100",
+                ? "bg-teal-400/15 text-teal-100 ring-1 ring-studio-border-strong"
+                : "text-stone-400 hover:bg-studio-surface-hover hover:text-stone-100",
             ].join(" ")}
           >
             {link.label}

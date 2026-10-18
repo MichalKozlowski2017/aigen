@@ -1,22 +1,131 @@
 @import "tailwindcss";
 
-:root {
+/*
+  AIGen studio themes — cool daylight light (default) + ink dark.
+  Avoid cream #F4F1EA, purple gradients, and glow-heavy dark bias.
+*/
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --background: #f2f5f7;
+  --foreground: #0c1214;
+
+  --studio-border: rgba(12, 18, 20, 0.18);
+  --studio-border-strong: rgba(12, 18, 20, 0.32);
+  --studio-surface: #ffffff;
+  --studio-surface-hover: #e7eef1;
+  --studio-inset: #e2e9ed;
+  --studio-input: #ffffff;
+  --studio-media: #d5dee3;
+  --studio-track: rgba(12, 18, 20, 0.12);
+  --studio-header: rgba(242, 245, 247, 0.92);
+  --studio-cta-fg: #04201a;
+  --studio-glow-a: rgba(13, 107, 95, 0.12);
+  --studio-glow-b: rgba(180, 120, 40, 0.08);
+  --studio-grid: rgba(12, 18, 20, 0.06);
+  --studio-grain-opacity: 0.04;
+
+  /* Remap stone: light text utilities → near-black / readable muted (WCAG AA+) */
+  --color-stone-50: #0c1214;
+  --color-stone-100: #121a1c;
+  --color-stone-200: #1a2428;
+  --color-stone-300: #243033;
+  --color-stone-400: #2f3d41;
+  --color-stone-500: #3a484c;
+  --color-stone-600: #4a585c;
+  --color-stone-700: #5c6a6e;
+  --color-stone-800: #d5dee3;
+  --color-stone-900: #e7eef1;
+  --color-stone-950: #f2f5f7;
+
+  /* Soft teal text on dark → deep teal ink on light */
+  --color-teal-50: #04201a;
+  --color-teal-100: #0a3d32;
+  --color-teal-200: #0d5244;
+  --color-teal-300: #0f6b58;
+
+  --color-amber-50: #78350f;
+  --color-amber-100: #92400e;
+  --color-amber-200: #a16207;
+  --color-rose-100: #9f1239;
+  --color-rose-200: #be123c;
+  --color-rose-300: #9f1239;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
   --background: #071210;
   --foreground: #f5f5f4;
+
+  --studio-border: rgba(255, 255, 255, 0.1);
+  --studio-border-strong: rgba(255, 255, 255, 0.2);
+  --studio-surface: rgba(255, 255, 255, 0.03);
+  --studio-surface-hover: rgba(255, 255, 255, 0.06);
+  --studio-inset: rgba(0, 0, 0, 0.22);
+  --studio-input: #0b1614;
+  --studio-media: rgba(0, 0, 0, 0.45);
+  --studio-track: rgba(255, 255, 255, 0.1);
+  --studio-header: rgba(7, 18, 16, 0.8);
+  --studio-cta-fg: #04201a;
+  --studio-glow-a: rgba(20, 120, 100, 0.35);
+  --studio-glow-b: rgba(180, 110, 40, 0.18);
+  --studio-grid: rgba(255, 255, 255, 0.03);
+  --studio-grain-opacity: 0.12;
+
+  --color-stone-50: #fafaf9;
+  --color-stone-100: #f5f5f4;
+  --color-stone-200: #e7e5e4;
+  --color-stone-300: #d6d3d1;
+  --color-stone-400: #a8a29e;
+  --color-stone-500: #78716c;
+  --color-stone-600: #57534e;
+  --color-stone-700: #44403c;
+  --color-stone-800: #292524;
+  --color-stone-900: #1c1917;
+  --color-stone-950: #0c0a09;
+
+  --color-teal-50: #f0fdfa;
+  --color-teal-100: #ccfbf1;
+  --color-teal-200: #99f6e4;
+  --color-teal-300: #5eead4;
+
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-rose-100: #ffe4e6;
+  --color-rose-200: #fecdd3;
+  --color-rose-300: #fda4af;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-studio-border: var(--studio-border);
+  --color-studio-border-strong: var(--studio-border-strong);
+  --color-studio-surface: var(--studio-surface);
+  --color-studio-surface-hover: var(--studio-surface-hover);
+  --color-studio-inset: var(--studio-inset);
+  --color-studio-input: var(--studio-input);
+  --color-studio-media: var(--studio-media);
+  --color-studio-track: var(--studio-track);
+  --color-studio-header: var(--studio-header);
+  --color-studio-cta-fg: var(--studio-cta-fg);
 }
 
 html {
   scrollbar-gutter: stable;
 }
 
+html,
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+body {
   overflow-x: clip;
 }
 
@@ -27,12 +136,18 @@ body {
 
 .studio-shell {
   font-family: var(--font-studio-sans), "IBM Plex Sans", system-ui, sans-serif;
-  color-scheme: dark;
+  color-scheme: inherit;
 }
 
 .studio-grain {
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
   background-size: 180px 180px;
+  opacity: var(--studio-grain-opacity);
+  mix-blend-mode: multiply;
+}
+
+[data-theme="dark"] .studio-grain {
+  mix-blend-mode: overlay;
 }
 
 @keyframes studio-fade-up {
@@ -49,10 +164,10 @@ body {
 @keyframes studio-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.25);
+    box-shadow: 0 0 0 0 color-mix(in srgb, #2dd4bf 25%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 8px rgba(45, 212, 191, 0);
+    box-shadow: 0 0 0 8px transparent;
   }
 }
 

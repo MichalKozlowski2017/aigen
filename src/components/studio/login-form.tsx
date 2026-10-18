@@ -44,14 +44,14 @@ export function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
           required
           autoFocus
-          className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm outline-none focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
+          className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5 text-sm outline-none focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
         />
       </label>
       {error ? <p className="text-sm text-rose-300">{error}</p> : null}
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-lg bg-teal-400 py-2.5 text-sm font-semibold text-[#04201a] disabled:opacity-60"
+        className="w-full rounded-lg bg-teal-400 py-2.5 text-sm font-semibold text-studio-cta-fg disabled:opacity-60"
       >
         {pending ? "Sprawdzam…" : "Wejdź"}
       </button>

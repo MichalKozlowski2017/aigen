@@ -33,7 +33,7 @@ export default async function StudioDashboardPage() {
         />
       </section>
 
-      <section className="space-y-2 border-t border-white/[0.06] pt-8">
+      <section className="space-y-2 border-t border-studio-border pt-8">
         <h2
           className="text-lg font-semibold text-stone-200"
           style={{ fontFamily: "var(--font-studio-display), system-ui" }}

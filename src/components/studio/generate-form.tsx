@@ -1092,7 +1092,7 @@ export function GenerateForm({
                       "rounded-lg border px-3 py-2 text-left text-sm transition",
                       videoEngine === opt.id
                         ? "border-teal-400/50 bg-teal-400/10 text-teal-50"
-                        : "border-white/10 bg-white/[0.03] text-stone-300 hover:border-white/20",
+                        : "border-studio-border bg-studio-surface text-stone-300 hover:border-studio-border-strong",
                     ].join(" ")}
                   >
                     <span className="block font-medium">{opt.label}</span>
@@ -1135,7 +1135,7 @@ export function GenerateForm({
                           ? p.experimental
                             ? "border-orange-400/45 bg-orange-400/10 text-orange-50"
                             : "border-amber-400/45 bg-amber-400/10 text-amber-50"
-                          : "border-white/10 bg-white/[0.03] text-stone-300 hover:border-white/20",
+                          : "border-studio-border bg-studio-surface text-stone-300 hover:border-studio-border-strong",
                       ].join(" ")}
                     >
                       <span className="block font-medium">
@@ -1169,7 +1169,7 @@ export function GenerateForm({
               </fieldset>
             ) : null}
 
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5">
               <input
                 type="checkbox"
                 checked={faceRestore}
@@ -1193,7 +1193,7 @@ export function GenerateForm({
             {videoEngine === "wan" ? (
               <>
                 <div className="flex flex-col gap-2 sm:flex-row">
-                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5">
                     <input
                       type="checkbox"
                       checked={postRife}
@@ -1230,7 +1230,7 @@ export function GenerateForm({
                       </span>
                     </span>
                   </label>
-                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5">
                     <input
                       type="checkbox"
                       checked={postUpscale}
@@ -1276,7 +1276,7 @@ export function GenerateForm({
                     onChange={(e) =>
                       setWanChunkMax(Number(e.target.value) as WanChunkLengthOption)
                     }
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-stone-200"
+                    className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm text-stone-200"
                   >
                     {WAN_CHUNK_LENGTH_OPTIONS.map((n) => (
                       <option key={n} value={n}>
@@ -1332,7 +1332,7 @@ export function GenerateForm({
               className={`cursor-pointer rounded-xl border border-dashed px-4 py-6 transition ${
                 dragOver
                   ? "border-teal-400/60 bg-teal-400/10"
-                  : "border-white/15 bg-white/[0.03] hover:border-teal-400/35"
+                  : "border-studio-border-strong bg-studio-surface hover:border-teal-400/35"
               }`}
             >
               <input
@@ -1354,7 +1354,7 @@ export function GenerateForm({
                     className="h-24 w-24 shrink-0 rounded-lg object-cover"
                   />
                 ) : (
-                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-black/20 text-xs text-stone-500">
+                  <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded-lg border border-studio-border bg-studio-inset text-xs text-stone-500">
                     SVD
                   </div>
                 )}
@@ -1378,14 +1378,14 @@ export function GenerateForm({
               <button
                 type="button"
                 onClick={() => setGalleryOpen((v) => !v)}
-                className="rounded-lg border border-white/12 px-3 py-2 text-sm text-stone-200 hover:border-teal-400/40 hover:text-teal-100"
+                className="rounded-lg border border-studio-border px-3 py-2 text-sm text-stone-200 hover:border-teal-400/40 hover:text-teal-100"
               >
                 {galleryOpen ? "Ukryj galerię" : "Z galerii"}
               </button>
             </div>
 
             {galleryOpen ? (
-              <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="rounded-xl border border-studio-border bg-studio-inset p-3">
                 <p className="mb-2 text-xs uppercase tracking-[0.16em] text-stone-500">
                   Wybierz obraz startowy z Galerii
                 </p>
@@ -1402,7 +1402,7 @@ export function GenerateForm({
                         type="button"
                         disabled={uploadBusy}
                         onClick={() => void importGalleryAsStart(item)}
-                        className="group block w-full overflow-hidden rounded-lg border border-white/10 bg-black/30 text-left hover:border-teal-400/50 disabled:opacity-50"
+                        className="group block w-full overflow-hidden rounded-lg border border-studio-border bg-studio-inset text-left hover:border-teal-400/50 disabled:opacity-50"
                       >
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -1429,7 +1429,7 @@ export function GenerateForm({
                   setStartImageSource(null);
                 }}
                 placeholder="np. start.png"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
               />
             </Field>
           </div>
@@ -1444,7 +1444,7 @@ export function GenerateForm({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={5}
-            className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-stone-100 outline-none ring-teal-400/0 transition focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
+            className="w-full resize-y rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5 text-sm text-stone-100 outline-none ring-teal-400/0 transition focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
             placeholder={
               kind === "video"
                 ? "Opis ruchu / klimatu po polsku (SVD: głównie obraz startowy; prompt i tak idzie przez boost EN)…"
@@ -1455,7 +1455,7 @@ export function GenerateForm({
             <details
               open={boostOpen}
               onToggle={(e) => setBoostOpen((e.target as HTMLDetailsElement).open)}
-              className="mt-2 rounded-lg border border-white/8 bg-black/20 px-3 py-2"
+              className="mt-2 rounded-lg border border-studio-border bg-studio-inset px-3 py-2"
             >
               <summary className="cursor-pointer select-none text-xs text-stone-400">
                 Prompt do modelu (EN)
@@ -1499,7 +1499,7 @@ export function GenerateForm({
                   ? DEFAULT_WAN_NEGATIVE
                   : DEFAULT_SDXL_NEGATIVE
               }
-              className="w-full resize-y rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm text-stone-100 outline-none focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
+              className="w-full resize-y rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5 text-sm text-stone-100 outline-none focus:border-teal-400/40 focus:ring-2 focus:ring-teal-400/20"
             />
             {kind === "video" ? (
               <p className="mt-1 text-[11px] text-stone-500">
@@ -1525,7 +1525,7 @@ export function GenerateForm({
                   }
                 }
               }}
-              className="w-full rounded-lg border border-white/10 bg-[#0b1614] px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-studio-border bg-studio-input px-3 py-2 text-sm"
             >
               {modelOptions.map((m) => (
                 <option key={m.value} value={m.value}>
@@ -1539,7 +1539,7 @@ export function GenerateForm({
               type="number"
               value={seed}
               onChange={(e) => setSeed(Number(e.target.value))}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
             />
           </Field>
           <Field
@@ -1563,7 +1563,7 @@ export function GenerateForm({
               value={wanFastGeo?.locked ? wanFastGeo.width : width}
               disabled={wanFastLocked}
               onChange={(e) => setWidth(Number(e.target.value))}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"
+              className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
           <Field
@@ -1587,7 +1587,7 @@ export function GenerateForm({
               value={wanFastGeo?.locked ? wanFastGeo.height : height}
               disabled={wanFastLocked}
               onChange={(e) => setHeight(Number(e.target.value))}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm disabled:opacity-60"
+              className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
           {kind === "image" ? (
@@ -1598,7 +1598,7 @@ export function GenerateForm({
                 max={4}
                 value={batch}
                 onChange={(e) => setBatch(Number(e.target.value))}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
               />
             </Field>
           ) : (
@@ -1616,7 +1616,7 @@ export function GenerateForm({
                     const next = Number(e.target.value);
                     setDurationSec(Math.min(next, durationInputMax));
                   }}
-                  className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
                 />
               </Field>
               {videoEngine === "wan" ? (
@@ -1624,7 +1624,7 @@ export function GenerateForm({
                   <select
                     value={snapWanFps(fps)}
                     onChange={(e) => setFps(Number(e.target.value))}
-                    className="w-full rounded-lg border border-white/10 bg-[#0b1614] px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-studio-border bg-studio-input px-3 py-2 text-sm"
                   >
                     {WAN_FPS_OPTIONS.map((f) => (
                       <option key={f} value={f}>
@@ -1644,7 +1644,7 @@ export function GenerateForm({
                     max={videoLimits.maxFps}
                     value={fps}
                     onChange={(e) => setFps(Number(e.target.value))}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
                   />
                 </Field>
               )}
@@ -1674,7 +1674,7 @@ export function GenerateForm({
                         setSteps(n);
                       }
                     }}
-                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
                   />
                 </Field>
               ) : null}
@@ -1789,7 +1789,7 @@ export function GenerateForm({
               <p className="text-sm text-rose-100/70">{errorDetail.hint}</p>
             ) : null}
             {errorDetail?.details ? (
-              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 font-mono text-[11px] leading-snug text-rose-100/80">
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded bg-studio-inset p-2 font-mono text-[11px] leading-snug text-rose-100/80">
                 {errorDetail.details}
               </pre>
             ) : null}
@@ -1816,7 +1816,7 @@ export function GenerateForm({
           <button
             type="submit"
             disabled={pending || uploadBusy}
-            className="studio-cta rounded-lg bg-teal-400 px-5 py-2.5 text-sm font-semibold text-[#04201a] transition hover:bg-teal-300 disabled:opacity-60"
+            className="studio-cta rounded-lg bg-teal-400 px-5 py-2.5 text-sm font-semibold text-studio-cta-fg transition hover:bg-teal-300 disabled:opacity-60"
           >
             {pending
               ? chunkInfo
@@ -1843,7 +1843,7 @@ export function GenerateForm({
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
           Podgląd
         </p>
-        <div className="relative min-h-[280px] overflow-hidden rounded-xl border border-dashed border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent p-4">
+        <div className="relative min-h-[280px] overflow-hidden rounded-xl border border-dashed border-studio-border bg-gradient-to-br from-studio-surface to-transparent p-4">
           {status || pending ? (
             <GenerationProgressPanel
               status={status}
@@ -1880,7 +1880,7 @@ export function GenerateForm({
                       controls
                       playsInline
                       preload="metadata"
-                      className="w-full bg-black/40"
+                      className="w-full bg-studio-media"
                     />
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -1905,7 +1905,7 @@ export function GenerateForm({
               </p>
               <Link
                 href="/gallery"
-                className="inline-flex rounded-lg bg-teal-400 px-3 py-1.5 text-sm font-semibold text-[#04201a] hover:bg-teal-300"
+                className="inline-flex rounded-lg bg-teal-400 px-3 py-1.5 text-sm font-semibold text-studio-cta-fg hover:bg-teal-300"
               >
                 Otwórz Galerię
               </Link>
@@ -2001,7 +2001,7 @@ function GenerationProgressPanel({
           {elapsed != null ? ` · ${formatElapsed(elapsed)}` : null}
         </p>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-white/10">
+      <div className="h-2 overflow-hidden rounded-full bg-studio-track">
         <div
           className={[
             "h-full rounded-full bg-teal-400 transition-[width] duration-500",
