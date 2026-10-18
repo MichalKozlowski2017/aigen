@@ -1242,9 +1242,13 @@ export function GenerateForm({
                   </span>
                   {" — "}
                   <strong className="font-medium text-teal-50">Fast 480p</strong>{" "}
-                  = Wan 2.2 MoE (high+low + lightx2v 4-step) gdy wagi na Comfy,
-                  inaczej Wan 2.1 distill LoRA (steps {WAN_DISTILL_STEPS_MIN}–
-                  {WAN_DISTILL_STEPS_MAX} · CFG=1 · euler · tylko 480p). Quality
+                  = Wan 2.1 + lightx2v distill LoRA (steps {WAN_DISTILL_STEPS_MIN}
+                  –{WAN_DISTILL_STEPS_MAX} · CFG=1 · euler · tylko 480p).{" "}
+                  <span className="text-amber-100/90">
+                    Wan 2.2 MoE + Sage Attention chwilowo niestabilne na RTX 5080
+                  </span>{" "}
+                  (CUDA no-kernel) — Fast bez Sage; MoE/Sage dopiero po fixie
+                  PyTorch/sm_120 (`WAN22_MOE_ENABLE` / `WAN_SAGE_ENABLE`). Quality
                   720p = bez LoRA. 24 fps: preferuj Smooth 24 (RIFE); Native 24 =
                   experimental.
                 </p>

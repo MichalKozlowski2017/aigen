@@ -522,8 +522,12 @@ async function advancePipelineUnlocked(
 
   if (job.status === "failed") {
     state.status = "failed";
-    state.error =
-      job.progress.errorMessage ?? `Chunk ${state.chunkIndex} nieudany`;
+    const chunkLabel = `Chunk ${state.chunkIndex + 1}/${state.plan.chunkCount}`;
+    const comfyDetail =
+      job.progress.errorMessage ||
+      job.progress.errorHint ||
+      "brak szczegółów z Comfy (sprawdź logi Legion)";
+    state.error = `${chunkLabel} failed in Comfy — ${comfyDetail}`;
     state.progress = emptyProgress({
       percent: 100,
       stage: "fail",
