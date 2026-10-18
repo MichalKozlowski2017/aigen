@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
-import { getComfyUrl } from "@/lib/studio/config";
+import { getComfyUrlAsync } from "@/lib/studio/config";
 import {
   comfyViewSubfolderFallbacks,
   mimeFromFilename,
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   );
 
   const range = request.headers.get("range");
-  const base = getComfyUrl().replace(/\/$/, "");
+  const base = (await getComfyUrlAsync()).replace(/\/$/, "");
   const candidates = comfyViewSubfolderFallbacks(normalized.subfolder);
 
   let lastStatus = 404;

@@ -1,3 +1,7 @@
+import {
+  peekComfyUrl,
+  resolveComfyUrl,
+} from "./comfy-url-store";
 import { FLUX_MODEL_ID } from "./flux";
 import type { StudioPublicConfig } from "./types";
 
@@ -10,8 +14,17 @@ function trimOrUndefined(value: string | undefined): string | undefined {
   return t ? t : undefined;
 }
 
+/**
+ * Sync COMFYUI_URL — pamięć (override z Legion publish) albo env.
+ * Preferuj `await getComfyUrlAsync()` w async ścieżkach (hydrate z KV).
+ */
 export function getComfyUrl(): string {
-  return trimOrUndefined(process.env.COMFYUI_URL) ?? DEFAULT_COMFY_URL;
+  return peekComfyUrl(DEFAULT_COMFY_URL);
+}
+
+/** Async: pamięć → Vercel KV (opcjonalnie) → env → default. */
+export async function getComfyUrlAsync(): Promise<string> {
+  return resolveComfyUrl(DEFAULT_COMFY_URL);
 }
 
 /** true gdy COMFYUI_URL to tunel / zdalny host (nie localhost / 127.0.0.1). */
@@ -62,10 +75,9 @@ export function getDefaultImageModel(): string {
   return raw;
 }
 
-export function getStudioPublicConfig(): StudioPublicConfig {
+function buildPublicConfig(comfyUrl: string): StudioPublicConfig {
   const modelsDir = getModelsDir();
   const outputDir = getOutputDir();
-  const comfyUrl = getComfyUrl();
   return {
     comfyUrl,
     comfyRemote: isRemoteComfyUrl(comfyUrl),
@@ -77,4 +89,13 @@ export function getStudioPublicConfig(): StudioPublicConfig {
     defaultCheckpoint: getDefaultCheckpoint(),
     defaultImageModel: getDefaultImageModel(),
   };
+}
+
+/** Sync config (może być stale vs KV). Preferuj getStudioPublicConfigAsync. */
+export function getStudioPublicConfig(): StudioPublicConfig {
+  return buildPublicConfig(getComfyUrl());
+}
+
+export async function getStudioPublicConfigAsync(): Promise<StudioPublicConfig> {
+  return buildPublicConfig(await getComfyUrlAsync());
 }

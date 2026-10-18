@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { getStudioPublicConfig } from "@/lib/studio/config";
+import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 import { StudioBackdrop } from "./studio-backdrop";
 import { StudioNav } from "./studio-nav";
 import { studioDisplay, studioSans } from "./studio-fonts";
 
-export function StudioChrome({ children }: { children: React.ReactNode }) {
-  const config = getStudioPublicConfig();
+export async function StudioChrome({ children }: { children: React.ReactNode }) {
+  const config = await getStudioPublicConfigAsync();
   const footerNote = config.comfyRemote
     ? "Panel steruje zdalnym ComfyUI przez COMFYUI_URL (tunel)."
     : "Panel steruje lokalnym ComfyUI (COMFYUI_URL).";

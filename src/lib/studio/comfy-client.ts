@@ -11,7 +11,7 @@ import {
   getCachedExecutingNode,
   getCachedLiveProgress,
 } from "./comfy-progress-live";
-import { getComfyUrl } from "./config";
+import { getComfyUrl, getComfyUrlAsync } from "./config";
 import type { ComfyHealth } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 4_000;
@@ -83,7 +83,7 @@ async function fetchComfy(
   pathname: string,
   init?: RequestInit & { timeoutMs?: number }
 ): Promise<Response> {
-  const base = getComfyUrl().replace(/\/$/, "");
+  const base = (await getComfyUrlAsync()).replace(/\/$/, "");
   const timeoutMs = init?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -103,7 +103,7 @@ async function fetchComfy(
 }
 
 export async function checkComfyHealth(): Promise<ComfyHealth> {
-  const url = getComfyUrl();
+  const url = await getComfyUrlAsync();
   const started = Date.now();
   try {
     const res = await fetchComfy("/system_stats", { timeoutMs: 3_000 });

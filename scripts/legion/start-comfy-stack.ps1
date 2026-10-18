@@ -8,8 +8,9 @@
 
   Po starcie Quick Tunnel URL trafia do:
     <ComfyRoot>\logs\cloudflared-tunnel-url.txt
-  Skopiuj ten URL do Vercel → Settings → Environment Variables → COMFYUI_URL
-  (albo użyj Named Tunnel — stały hostname, bez aktualizacji po reboocie).
+  Bez domeny: ustaw AIGEN_PANEL_URL + COMFY_URL_UPDATE_SECRET na Legionie —
+  skrypt wywoła publish-comfy-url.ps1 (POST /api/settings/comfy-url).
+  Named Tunnel (stały hostname) — docs/named-cloudflare-tunnel.md.
 
 .NOTES
   Wymaga: cloudflared w PATH, venv Comfy (opcjonalnie), Python.
@@ -145,14 +146,43 @@ function Start-WorkerIfNeeded {
   & $workerScript -ComfyRoot $root
 }
 
+function Publish-ComfyUrlIfConfigured {
+  if (-not (Test-Path $urlFile)) { return }
+  $panel = $env:AIGEN_PANEL_URL
+  if (-not $panel) { $panel = $env:AIGEN_URL }
+  $secret = $env:COMFY_URL_UPDATE_SECRET
+  if (-not $secret) { $secret = $env:REVALIDATE_SECRET }
+  if (-not $panel -or -not $secret) {
+    Write-StackLog "Auto-publish pominiety (ustaw AIGEN_PANEL_URL + COMFY_URL_UPDATE_SECRET)"
+    return
+  }
+  $pub = Join-Path $PSScriptRoot "publish-comfy-url.ps1"
+  if (-not (Test-Path $pub)) {
+    Write-StackLog "Brak publish-comfy-url.ps1 — pomijam"
+    return
+  }
+  try {
+    Write-StackLog "Auto-publish Quick Tunnel URL → $panel"
+    & $pub -ComfyRoot $root -PanelUrl $panel -Secret $secret
+  } catch {
+    Write-StackLog "Auto-publish nieudany: $($_.Exception.Message)"
+  }
+}
+
 Write-StackLog "=== start-comfy-stack root=$root ==="
 Start-ComfyIfNeeded
 Start-TunnelIfNeeded
+Publish-ComfyUrlIfConfigured
 Start-WorkerIfNeeded
 Write-StackLog "=== stack gotowy ==="
 if (Test-Path $urlFile) {
   $finalUrl = (Get-Content $urlFile -Raw).Trim()
   Write-Host ""
   Write-Host "COMFYUI_URL=$finalUrl" -ForegroundColor Cyan
-  Write-Host "Skopiuj do Vercel Environment Variables (Production + Redeploy)." -ForegroundColor Yellow
+  if ($env:AIGEN_PANEL_URL -or $env:AIGEN_URL) {
+    Write-Host "Auto-publish: AIGEN_PANEL_URL ustawione (patrz log wyzej)." -ForegroundColor Cyan
+  } else {
+    Write-Host "Bez domeny: ustaw AIGEN_PANEL_URL + COMFY_URL_UPDATE_SECRET i re-run, albo:" -ForegroundColor Yellow
+    Write-Host "  powershell -File scripts\legion\publish-comfy-url.ps1 -ComfyRoot `"$root`"" -ForegroundColor Yellow
+  }
 }

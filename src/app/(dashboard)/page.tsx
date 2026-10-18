@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { HealthPanel } from "@/components/studio/health-panel";
 import { checkComfyHealth } from "@/lib/studio/comfy-client";
-import { getStudioPublicConfig } from "@/lib/studio/config";
+import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioDashboardPage() {
   const [health, config] = await Promise.all([
     checkComfyHealth(),
-    Promise.resolve(getStudioPublicConfig()),
+    getStudioPublicConfigAsync(),
   ]);
 
   return (

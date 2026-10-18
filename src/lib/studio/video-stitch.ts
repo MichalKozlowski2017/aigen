@@ -154,7 +154,7 @@ async function uploadVideoToComfy(
   subfolder: string
 ): Promise<{ name: string; subfolder: string; type: string }> {
   // reuse FormData upload path from comfy-client pattern
-  const { getComfyUrl } = await import("./config");
+  const { getComfyUrlAsync } = await import("./config");
   const form = new FormData();
   form.append(
     "image",
@@ -165,7 +165,7 @@ async function uploadVideoToComfy(
   form.append("type", type);
   form.append("subfolder", subfolder);
 
-  const base = getComfyUrl().replace(/\/$/, "");
+  const base = (await getComfyUrlAsync()).replace(/\/$/, "");
   const res = await fetch(`${base}/upload/image`, {
     method: "POST",
     body: form,

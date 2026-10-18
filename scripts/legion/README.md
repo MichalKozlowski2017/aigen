@@ -30,11 +30,21 @@ Albo ręcznie: Task Scheduler → At log on → ta sama komenda `start-comfy-sta
 
 `*.trycloudflare.com` **zmienia hostname** po restarcie `cloudflared`.
 
-1. Otwórz `logs\cloudflared-tunnel-url.txt`
-2. Vercel → Project → Settings → Environment Variables → `COMFYUI_URL`
-3. Redeploy (env bywa cache’owane do redeploy)
+**Bez domeny — auto-publish (zalecane):**
 
-### Named Tunnel (zalecane — stały URL)
+1. Vercel: `COMFY_URL_UPDATE_SECRET` (+ opcjonalnie Vercel KV)
+2. Legion ENV: `AIGEN_PANEL_URL` + ten sam sekret
+3. `start-comfy-stack.ps1` → `publish-comfy-url.ps1` → `POST /api/settings/comfy-url`
+
+Ręcznie:
+
+```powershell
+powershell -File scripts\legion\publish-comfy-url.ps1 -ComfyRoot "C:\Users\mkozl\Sites\ComfyUI"
+```
+
+Szczegóły: [`docs/named-cloudflare-tunnel.md`](../../docs/named-cloudflare-tunnel.md#bez-domeny-auto-sync-quick-tunnel).
+
+### Named Tunnel (zalecane gdy jest domena — stały URL)
 
 Pełna instrukcja: [`docs/named-cloudflare-tunnel.md`](../../docs/named-cloudflare-tunnel.md).
 
