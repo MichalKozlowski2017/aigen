@@ -29,6 +29,7 @@ import type { GenerateBody } from "./schemas";
 import { pickChunkOutputs, type MediaRef } from "./video-outputs";
 import { runVideoPostProcess } from "./video-postprocess";
 import { stitchComfyClips } from "./video-stitch";
+import { applyWanOrientationSize } from "./video-orientation";
 import { coerceWanFast480pGeometry } from "./wan-distill";
 import {
   buildWorkflow,
@@ -765,13 +766,21 @@ export async function startVideoPipeline(
     kind: "video",
   });
 
-  // Fast + lightx2v: wymuś 480p zanim plan chunków / persist stanu
-  const geo = coerceWanFast480pGeometry({
+  // Orientacja (Pion/Poziom/Auto) + Fast 480p lock przed planem chunków
+  const oriented = applyWanOrientationSize({
+    orientation: rawBody.orientation,
     qualityPreset: rawBody.qualityPreset,
     wanDistillLora: rawBody.wanDistillLora,
     width: rawBody.width,
     height: rawBody.height,
+  });
+  const geo = coerceWanFast480pGeometry({
+    qualityPreset: rawBody.qualityPreset,
+    wanDistillLora: rawBody.wanDistillLora,
+    width: oriented.width,
+    height: oriented.height,
     model: rawBody.model,
+    orientation: rawBody.orientation,
   });
 
   const body: GenerateBody = {
@@ -781,9 +790,9 @@ export async function startVideoPipeline(
     startImage: ensured.startImage,
     startImageSource: undefined,
     videoEngine: engine,
-    ...(geo.locked
-      ? { width: geo.width, height: geo.height, model: geo.model }
-      : {}),
+    width: geo.locked ? geo.width : oriented.width,
+    height: geo.locked ? geo.height : oriented.height,
+    ...(geo.locked ? { model: geo.model } : {}),
   };
 
   const videoPlan = planVideo(body);

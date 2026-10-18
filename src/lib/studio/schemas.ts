@@ -58,6 +58,11 @@ export const generateBodySchema = z.object({
    * Fast default 81; Quality720 65; smoke 33. UI opcja nie psuje short smoke.
    */
   maxPerChunk: z.number().int().min(17).max(81).optional(),
+  /**
+   * Orientacja UI: Auto (z obrazu/dims) | Pion | Poziom.
+   * Wymusza 480×832 / 832×480 (Fast) albo 720×1280 / 1280×720 (Quality 720p).
+   */
+  orientation: z.enum(["auto", "portrait", "landscape"]).optional(),
   /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji chunków */
   ltxSaveTail: z.boolean().optional().default(false),
   /** Indeks chunka (prefix plików) */
