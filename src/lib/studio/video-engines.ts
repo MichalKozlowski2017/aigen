@@ -49,8 +49,28 @@ export const VIDEO_ENGINE_OPTIONS: Array<{
 ];
 
 /**
+ * Chunk lengths (4n+1) — RTX 5080 16GB / Legion A/B:
+ * - Fast 480p + LoRA + Sage KJ: **prefer 81** (mniej reloadów / mniej driftu)
+ * - Quality 720p: **prefer 65** (SAFE720 L81 interrupted → provisional 65)
+ * - Smoke: 33 (krótki test; UI default duration 2s @16fps ≈33 i tak)
+ * Mid 49 zostaje opcją UI gdy 81 za ciężkie z LoRA+Sage.
+ */
+export const WAN_CHUNK_SMOKE = 33;
+export const WAN_CHUNK_MID = 49;
+export const WAN_CHUNK_QUALITY_720 = 65;
+/** Preferowany default Fast / pipeline — równy SAFE maxLength. */
+export const WAN_CHUNK_PREFERRED_FAST = 81;
+export const WAN_CHUNK_LENGTH_OPTIONS = [
+  WAN_CHUNK_SMOKE,
+  WAN_CHUNK_MID,
+  WAN_CHUNK_QUALITY_720,
+  WAN_CHUNK_PREFERRED_FAST,
+] as const;
+export type WanChunkLengthOption = (typeof WAN_CHUNK_LENGTH_OPTIONS)[number];
+
+/**
  * Wan 2.1 I2V — length 4n+1 (WanImageToVideo step 4).
- * SAFE maxLength=81 (480p i 720p FP8) — dłuższe: planWanChunks.
+ * SAFE maxLength=81 (480p FP8) — dłuższe: planWanChunks.
  * FPS 16 | 24; @24fps/10s ≈ 3 chunki (requestedFrames = duration×fps).
  */
 export const WAN_UI_LIMITS = {
@@ -58,9 +78,15 @@ export const WAN_UI_LIMITS = {
   maxHeight: 720,
   maxFps: 24,
   minLength: 17,
-  /** Max klatek na jeden prompt Wan (SAFE 4n+1 @ FP8 + offload) */
-  maxLength: 81,
-  comfortLength: 33,
+  /** Max klatek na jeden prompt Wan (SAFE 4n+1 @ FP8 480p + offload) */
+  maxLength: WAN_CHUNK_PREFERRED_FAST,
+  /**
+   * Fast 480p: 81 jest preferowane (nie „risky”).
+   * Ostrzeżenie VRAM dla Quality 720p → comfortLength720.
+   */
+  comfortLength: WAN_CHUNK_PREFERRED_FAST,
+  /** Quality 720p — Legion A/B: L81 interrupted → comfort 65 */
+  comfortLength720: WAN_CHUNK_QUALITY_720,
   comfortDurationSec: 2,
   comfortFps: 16,
   defaultDurationSec: 2,
@@ -70,8 +96,32 @@ export const WAN_UI_LIMITS = {
   qualityWidth: 1280,
   qualityHeight: 720,
   maxDurationSec: 60,
-  note: "Wan: fotoreal / offload (FP8). Fast = lightx2v distill LoRA. FPS 16|24. 1 chunk ≤81 klatek (4n+1). Smooth 24 (RIFE) preferowane vs Native 24. 720p = Quality bez LoRA.",
+  note: "Wan: Fast 480p chunki preferuj 81 (4n+1). Quality 720p ≤65. Zalecane: Fast + RealESRGAN×2 + RIFE zamiast native 720p (wolne).",
 } as const;
+
+/** Preferowany maxPerChunk: Fast 480p → 81, Quality 720p → 65. */
+export function preferredWanChunkLength(options: {
+  width?: number;
+  height?: number;
+  model?: string;
+  override?: number;
+}): number {
+  if (
+    typeof options.override === "number" &&
+    Number.isFinite(options.override)
+  ) {
+    return snapWanLength(options.override);
+  }
+  const w = options.width ?? WAN_UI_LIMITS.defaultWidth;
+  const h = options.height ?? WAN_UI_LIMITS.defaultHeight;
+  const m = (options.model ?? "").toLowerCase();
+  const is720 =
+    w >= 1024 ||
+    h >= 640 ||
+    m.includes("720p") ||
+    m.includes("720_");
+  return is720 ? WAN_CHUNK_QUALITY_720 : WAN_CHUNK_PREFERRED_FAST;
+}
 
 /** Wybierz UNET 480p vs 720p po nazwie / rozdzielczości. */
 export function resolveWanUnet(options: {

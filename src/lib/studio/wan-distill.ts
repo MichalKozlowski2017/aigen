@@ -120,11 +120,12 @@ export async function resolveWanDistillLora(
   }
 }
 
-/** Fast preset (fast-480p / smooth-24) chce distill gdy UI nie wyłączył. */
+/** Fast preset (fast-480p / fast-upscale / smooth-24) chce distill gdy UI nie wyłączył. */
 export function wantsWanDistill(qualityPreset: string | undefined): boolean {
   return (
     !qualityPreset ||
     qualityPreset === "fast-480p" ||
+    qualityPreset === "fast-upscale" ||
     qualityPreset === "smooth-24"
   );
 }

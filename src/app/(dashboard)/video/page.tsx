@@ -54,9 +54,12 @@ export default async function StudioVideoPage() {
           <strong className="font-medium text-stone-300">Wan 2.1 I2V</strong>{" "}
           —{" "}
           <strong className="font-medium text-stone-300">Fast 480p</strong>{" "}
-          z distill LoRA lightx2v (steps 4–8 · CFG=1 · tylko 480p). Quality 720p
-          bez Fast LoRA.
-          24 fps: Smooth 24 (RIFE) preferowane; Native 24 experimental. SAFE 81.
+          (chunki preferuj <strong className="font-medium text-stone-300">81</strong>
+          ). Zalecane vs native 720p:{" "}
+          <strong className="font-medium text-stone-300">
+            Fast + upscale/smooth
+          </strong>{" "}
+          (RealESRGAN×2 + RIFE). Quality 720p = wolne (~40+ min/chunk).
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}

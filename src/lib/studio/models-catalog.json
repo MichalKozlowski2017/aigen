@@ -117,7 +117,7 @@
     "targetSubdir": "diffusion_models",
     "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_i2v_720p_14B_fp8_scaled.safetensors",
     "sizeHint": "~16.4 GB",
-    "notes": "Preset Quality 720p. Filename jak na Legionie. SAFE maxLength 81 @ 1280×720 — smoke na GPU. Te same deps co 480p (umt5 + vae + clip_vision).",
+    "notes": "Preset Quality 720p — WOLNE (~40+ min/chunk). Preferuj Fast + RealESRGAN×2 + RIFE. Chunk comfort ≤65 @720p (L81 interrupted). Deps: umt5 + vae + clip_vision.",
     "vramHintGb": 16
   },
   {
@@ -218,5 +218,49 @@
     "sizeHint": "~738 MB",
     "notes": "Fast 480p: LoraLoaderModelOnly + steps 4 + CFG 1 + euler. Graceful jeśli brak na Comfy (fallback steps ~10). Nazwa zsynchronizowana z Legion queue.",
     "vramHintGb": 1
+  },
+  {
+    "id": "wan22-i2v-high-fp8-distill",
+    "name": "Wan 2.2 I2V A14B high-noise FP8 lightx2v 4-step (ComfyUI)",
+    "type": "unet",
+    "filename": "wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "targetSubdir": "diffusion_models",
+    "downloadUrl": "https://huggingface.co/lightx2v/Wan2.2-Distill-Models/resolve/main/wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "sizeHint": "~15 GB",
+    "notes": "Legion-only download. Studio: detect + fallback 2.1 (MoE graph not wired). Para z low-noise. Nie pobieraj na cloud VM.",
+    "vramHintGb": 16
+  },
+  {
+    "id": "wan22-i2v-low-fp8-distill",
+    "name": "Wan 2.2 I2V A14B low-noise FP8 lightx2v 4-step (ComfyUI)",
+    "type": "unet",
+    "filename": "wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "targetSubdir": "diffusion_models",
+    "downloadUrl": "https://huggingface.co/lightx2v/Wan2.2-Distill-Models/resolve/main/wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "sizeHint": "~15 GB",
+    "notes": "Legion-only. Para z high-noise dla Fast 2.2 scaffold. Studio używa 2.1 aż follow-up podepnie graph.",
+    "vramHintGb": 16
+  },
+  {
+    "id": "wan22-lightx2v-lora-high",
+    "name": "Wan 2.2 lightx2v 4-step LoRA (high noise)",
+    "type": "lora",
+    "filename": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+    "targetSubdir": "loras",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+    "sizeHint": "~1.23 GB",
+    "notes": "Opcjonalna LoRA 4-step (Comfy-Org). Detect w wan22.ts; Fast path nadal 2.1.",
+    "vramHintGb": 2
+  },
+  {
+    "id": "wan22-lightx2v-lora-low",
+    "name": "Wan 2.2 lightx2v 4-step LoRA (low noise)",
+    "type": "lora",
+    "filename": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+    "targetSubdir": "loras",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+    "sizeHint": "~1.23 GB",
+    "notes": "Para z high-noise LoRA. Legion download; cloud VM — nie.",
+    "vramHintGb": 2
   }
 ]
