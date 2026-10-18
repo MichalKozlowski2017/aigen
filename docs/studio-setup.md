@@ -99,23 +99,39 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 | Tryb   | Rekomendacja                                      |
 |--------|----------------------------------------------------|
 | Obraz  | Flux.2 Dev fp8 (domyślnie); SDXL 1024² opcjonalnie |
-| Wideo  | Wan Fast 480p + lightx2v distill LoRA; Smooth 24 (RIFE); SVD legacy |
+| Wideo  | Wan Fast 480p + lightx2v; **Fast + upscale/smooth** (RealESRGAN×2 + RIFE); SVD legacy |
 
 ### Wan Fast (distill LoRA)
 
 - Plik: `models/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`
 - Preset **Fast**: **tylko 480p** — landscape **832×480** / portrait **480×832** (orientacja ze start image). Steps **4–8**, **CFG=1**, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje — API/UI nie nadpiszą (np. cfg=6 / 720p → coerce + warning)
 - Brak LoRA na Comfy → graceful fallback (steps ~10, CFG 6, bez LoRA) + ostrzeżenie w UI
-- **Quality 720p** = bez Fast LoRA / więcej steps; **Native 24** = experimental (preferuj Smooth 24 / RIFE)
-- Chunki: max **81** klatek/chunk (SAFE @ FP8); overlap drop w Comfy (`ImageFromBatch` index 1 dla chunk>0) + stitch probe fps/timebase przed `-c copy`
+- **Fast + upscale/smooth** = zalecane vs Quality 720p (480p + RealESRGAN×2 + RIFE)
+- **Quality 720p** = **wolne** (~40+ min/chunk @16GB) · bez Fast LoRA; **Native 24** = experimental
+- Chunki (4n+1): **preferuj 81** Fast 480p (mniej reloadów / mniej driftu); Quality 720p **≤65** (Legion A/B: L81 interrupted); UI opcja **33** = smoke. Short 2s @16fps i tak ≈33 — nie psuje smoke.
 
 ### Tip: 480p + RealESRGAN + RIFE vs native 720p
 
-Na ~16 GB VRAM zwykle **szybciej i stabilniej**: Fast 480p → opcjonalnie RealESRGAN (post) + RIFE 16→24, niż native Quality 720p (dłuższe chunki, więcej offload). Quality 720p zostaw gdy potrzebujesz natywnej ostrości bez upscale.
+Na ~16 GB VRAM zwykle **szybciej i stabilniej**: preset **Fast + upscale/smooth** (RealESRGAN×2 + RIFE 16→24) niż native Quality 720p. Quality 720p zostaw gdy potrzebujesz natywnej ostrości bez upscale.
 
 ### RAM: nie przełączaj Flux ↔ Wan w serii
 
-Serie Wan bez przełączania na Flux między jobami — unika thrash / reload modeli w VRAM+RAM na Legionie.
+Flux + Wan łącznie ~**73 GB** wag vs ~**64 GB** RAM Legion — przełączanie Obraz↔Wideo = thrash. Odpalaj wideo w serii (albo restart Comfy przed zmianą silnika). Tip w UI na obu stronach.
+
+### Wan 2.2 (scaffold — download tylko na Legionie)
+
+Studio **wykrywa** pliki Wan 2.2 i **zostaje przy 2.1** Fast aż follow-up podepnie dual-noise MoE graph. **Nie pobieraj multi-GB na cloud VM.**
+
+Filenames (Legion → `diffusion_models/` / `loras/`):
+
+| Rola | Plik |
+|------|------|
+| Fast distill FP8 high | `wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors` |
+| Fast distill FP8 low | `wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors` |
+| LoRA 4-step high | `wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors` |
+| LoRA 4-step low | `wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors` |
+
+HF: [lightx2v/Wan2.2-Distill-Models](https://huggingface.co/lightx2v/Wan2.2-Distill-Models), [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged). VAE/CLIP: te same co 2.1 (`wan_2.1_vae`, `umt5_xxl_fp8`, `clip_vision_h`).
 
 ### Comfy na Legionie (`--fast` + Sage via KJNodes)
 

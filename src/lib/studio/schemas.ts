@@ -30,9 +30,15 @@ export const generateBodySchema = z.object({
   faceRestore: z.boolean().optional().default(false),
   /** CodeFormer fidelity 0–1 (niżej = mocniejszy restore) */
   faceRestoreFidelity: z.number().min(0).max(1).optional(),
-  /** Preset Wan: fast-480p | smooth-24 | quality-720p | quality-24-native */
+  /** Preset Wan: fast-480p | fast-upscale | smooth-24 | quality-720p | quality-24-native */
   qualityPreset: z
-    .enum(["fast-480p", "smooth-24", "quality-720p", "quality-24-native"])
+    .enum([
+      "fast-480p",
+      "fast-upscale",
+      "smooth-24",
+      "quality-720p",
+      "quality-24-native",
+    ])
     .optional(),
   /**
    * Fast: lightx2v distill LoRA (LoraLoaderModelOnly) gdy plik na Comfy.
@@ -47,6 +53,11 @@ export const generateBodySchema = z.object({
   postUpscale: z.boolean().optional().default(false),
   /** Długość jednego chunka (Wan 4n+1 ≤81 / LTX 8n+1 ≤121) */
   ltxChunkLength: z.number().int().min(9).max(121).optional(),
+  /**
+   * Preferowany max klatek/chunk przy planowaniu (Wan).
+   * Fast default 81; Quality720 65; smoke 33. UI opcja nie psuje short smoke.
+   */
+  maxPerChunk: z.number().int().min(17).max(81).optional(),
   /** Zapisz ostatnią klatkę (SaveImage) do kontynuacji chunków */
   ltxSaveTail: z.boolean().optional().default(false),
   /** Indeks chunka (prefix plików) */

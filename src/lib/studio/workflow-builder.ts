@@ -25,12 +25,14 @@ import {
   effectiveDurationSec,
   maxLtxDurationAtFps,
   maxWanDurationAtFps,
+  preferredWanChunkLength,
   resolveWanUnet,
   snapLtxLength,
   snapWanFps,
   snapWanLength,
   type VideoEngineId,
 } from "./video-engines";
+import { detectWan22Availability } from "./wan22";
 import { LTX_CHUNK_OVERLAP, planLtxChunks, type LtxChunkPlan } from "./ltx-chunks";
 import { WAN_CHUNK_OVERLAP, planWanChunks } from "./wan-chunks";
 import txt2imgFluxTemplate from "./workflows/txt2img-flux.json";
@@ -56,6 +58,11 @@ export {
   DEFAULT_CODEFORMER,
   WAN_UI_LIMITS,
   WAN_FPS_OPTIONS,
+  WAN_CHUNK_SMOKE,
+  WAN_CHUNK_MID,
+  WAN_CHUNK_QUALITY_720,
+  WAN_CHUNK_PREFERRED_FAST,
+  WAN_CHUNK_LENGTH_OPTIONS,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
@@ -66,9 +73,21 @@ export {
   maxLtxDurationAtFps,
   effectiveDurationSec,
   isChunkedVideoEngine,
+  preferredWanChunkLength,
   resolveWanUnet,
   type VideoEngineId,
+  type WanChunkLengthOption,
 } from "./video-engines";
+export {
+  detectWan22Availability,
+  WAN22_I2V_HIGH_NOISE_FP8,
+  WAN22_I2V_LOW_NOISE_FP8,
+  WAN22_LIGHTX2V_LORA_HIGH,
+  WAN22_LIGHTX2V_LORA_LOW,
+  WAN22_HF_DISTILL,
+  WAN22_HF_COMFY_ORG,
+  type Wan22Detect,
+} from "./wan22";
 
 export { DEFAULT_WAN_NEGATIVE } from "./defaults";
 export {
@@ -307,6 +326,7 @@ export function planVideo(body: {
   height?: number;
   fps?: number;
   durationSec?: number;
+  maxPerChunk?: number;
 }): VideoPlan {
   const engine = resolveVideoEngine(body);
   if (engine === "wan") return planWanVideo(body);
@@ -370,6 +390,9 @@ export function planWanVideo(body: {
   height?: number;
   fps?: number;
   durationSec?: number;
+  model?: string;
+  /** UI / API override max klatek/chunk (4n+1). Domyślnie: Fast 81 / Quality720 65. */
+  maxPerChunk?: number;
 }): VideoPlan {
   const width =
     Math.round(
@@ -383,7 +406,7 @@ export function planWanVideo(body: {
         WAN_UI_LIMITS.maxHeight
       ) / 16
     ) * 16;
-  // UI: 16 | 24; requestedFrames = duration × fps → SAFE 81 ⇒ @24/10s ~3 chunki
+  // UI: 16 | 24; requestedFrames = duration × fps → prefer 81 Fast / 65 @720p
   const fps = snapWanFps(
     Math.min(
       Math.max(Math.round(body.fps ?? WAN_UI_LIMITS.defaultFps), 1),
@@ -397,10 +420,21 @@ export function planWanVideo(body: {
   );
   const durationSec = Math.min(requested, WAN_UI_LIMITS.maxDurationSec);
   const requestedFrames = estimateVideoFrames(durationSec, fps);
-  const chunkPlan = planWanChunks(requestedFrames, fps);
+  const maxPerChunk = preferredWanChunkLength({
+    width,
+    height,
+    model: body.model,
+    override: body.maxPerChunk,
+  });
+  const chunkPlan = planWanChunks(requestedFrames, fps, { maxPerChunk });
   const frames = chunkPlan.totalUniqueFrames;
   const effective = chunkPlan.effectiveDurationSec;
-  const is720 = width >= 1024 || height >= 640;
+  const shortSide = Math.min(width, height);
+  const longSide = Math.max(width, height);
+  const is720 = shortSide >= 640 || longSide >= 1024;
+  const comfort = is720
+    ? WAN_UI_LIMITS.comfortLength720
+    : WAN_UI_LIMITS.comfortLength;
 
   return {
     engine: "wan",
@@ -412,9 +446,9 @@ export function planWanVideo(body: {
     frames,
     durationClamped: requested > WAN_UI_LIMITS.maxDurationSec + 0.05,
     maxDurationAtFps: maxChunkDuration,
+    // Fast 480p @81 = OK; Quality 720p @>65 lub sam 720p = ostrzeżenie
     vramRisky:
-      chunkPlan.chunks.some((c) => c.length > WAN_UI_LIMITS.comfortLength) ||
-      is720,
+      chunkPlan.chunks.some((c) => c.length > comfort) || is720,
     chunkPlan,
   };
 }
@@ -610,6 +644,17 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       spliceWanSageAttention(graph);
     }
     // Brak KJNodes / offline — graceful skip (bez warning spam na każdy chunk)
+    // Wan 2.2: detect only (MoE graph not wired) — once per build, soft note
+    if (chunkIdx === 0) {
+      try {
+        const w22 = await detectWan22Availability();
+        if (w22.available) {
+          warnings.push(w22.note);
+        }
+      } catch {
+        /* offline — ignore */
+      }
+    }
   } else {
     steps = body.steps ?? preset?.steps ?? 18;
     cfg = body.cfg ?? preset?.cfg ?? 6;

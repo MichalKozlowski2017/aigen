@@ -27,6 +27,13 @@ export const DEFAULT_FLUX_GUIDANCE = 4;
 export const FLUX_UI_NOTE =
   "Flux.2 generuje dłużej niż SDXL (Dynamic VRAM na ~16 GB) — dłuższy czas jest OK dla jakości.";
 
+/**
+ * Flux (~33+17+0.3 GB) + Wan (~16+6+…) ≳ 73 GB wag vs ~64 GB RAM Legion —
+ * przełączanie Obraz↔Wideo w serii = thrash / reload z dysku.
+ */
+export const FLUX_WAN_RAM_THRASH_TIP =
+  "Tip RAM (~64 GB): Flux + Wan łącznie ~73 GB wag — nie przełączaj Obraz (Flux) ↔ Wideo (Wan) między jobami. Odpalaj wideo w serii (albo zrestartuj Comfy przed zmianą silnika).";
+
 function trimOrUndefined(value: string | undefined): string | undefined {
   const t = value?.trim();
   return t ? t : undefined;

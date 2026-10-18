@@ -19,6 +19,7 @@ import {
 
 export type WanQualityPresetId =
   | "fast-480p"
+  | "fast-upscale"
   | "smooth-24"
   | "quality-720p"
   | "quality-24-native";
@@ -77,9 +78,29 @@ export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
     showInUi: true,
   },
   {
+    id: "fast-upscale",
+    label: "Fast + upscale/smooth",
+    blurb:
+      "zalecane vs Quality 720p · 480p + RealESRGAN×2 + RIFE 16→24 · szybciej niż native 720p",
+    width: WAN_UI_LIMITS.defaultWidth,
+    height: WAN_UI_LIMITS.defaultHeight,
+    fps: 16,
+    steps: WAN_DISTILL_STEPS,
+    cfg: WAN_DISTILL_CFG,
+    samplerName: WAN_DISTILL_SAMPLER,
+    scheduler: WAN_DISTILL_SCHEDULER,
+    useDistillLora: true,
+    faceRestore: false,
+    faceRestoreFidelity: 0.5,
+    model: DEFAULT_WAN_UNET,
+    postRife: true,
+    postUpscale: true,
+    showInUi: true,
+  },
+  {
     id: "smooth-24",
     label: "Smooth 24",
-    blurb: "legacy — użyj toggle Post RIFE na Fast (preferowane vs Native 24)",
+    blurb: "legacy — użyj Fast + upscale/smooth albo toggle RIFE",
     width: WAN_UI_LIMITS.defaultWidth,
     height: WAN_UI_LIMITS.defaultHeight,
     fps: 16,
@@ -98,7 +119,8 @@ export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
   {
     id: "quality-720p",
     label: "Quality 720p",
-    blurb: "bez LoRA · 1280×720 · steps 18 · CFG 6 · wolne (~40+ min/chunk)",
+    blurb:
+      "WOLNE (~40+ min/chunk @16GB) · bez LoRA · 1280×720 · preferuj Fast + upscale/smooth",
     width: WAN_UI_LIMITS.qualityWidth,
     height: WAN_UI_LIMITS.qualityHeight,
     fps: 16,
@@ -117,7 +139,7 @@ export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
   {
     id: "quality-24-native",
     label: "Quality 24 native",
-    blurb: "experimental · 24 fps w samplerze · preferuj Smooth 24 (RIFE)",
+    blurb: "experimental · 24 fps w samplerze · preferuj Fast + RIFE",
     width: WAN_UI_LIMITS.defaultWidth,
     height: WAN_UI_LIMITS.defaultHeight,
     fps: 24,

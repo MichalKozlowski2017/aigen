@@ -5,7 +5,11 @@ import {
   getDefaultImageModel,
   getStudioPublicConfigAsync,
 } from "@/lib/studio/config";
-import { FLUX_UI_NOTE, buildImageModelOptions } from "@/lib/studio/flux";
+import {
+  FLUX_UI_NOTE,
+  FLUX_WAN_RAM_THRASH_TIP,
+  buildImageModelOptions,
+} from "@/lib/studio/flux";
 import { listInstalledCheckpoints } from "@/lib/studio/models";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +43,9 @@ export default async function StudioGeneratePage() {
           .
         </p>
         <p className="max-w-2xl text-sm text-amber-200/75">{FLUX_UI_NOTE}</p>
+        <p className="max-w-2xl text-sm text-amber-200/75">
+          {FLUX_WAN_RAM_THRASH_TIP}
+        </p>
       </header>
       <GenerateForm
         defaultModel={defaultModel}

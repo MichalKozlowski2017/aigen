@@ -10,6 +10,7 @@ import {
 } from "@/lib/studio/defaults";
 import {
   FLUX_MODEL_ID,
+  FLUX_WAN_RAM_THRASH_TIP,
   isFluxModel,
   type ImageModelOption,
 } from "@/lib/studio/flux";
@@ -21,16 +22,21 @@ import {
   VIDEO_ENGINE_OPTIONS,
   DEFAULT_WAN_FAST_STEPS,
   DEFAULT_WAN_QUALITY_PRESET,
+  WAN_CHUNK_LENGTH_OPTIONS,
+  WAN_CHUNK_PREFERRED_FAST,
+  WAN_CHUNK_QUALITY_720,
+  WAN_CHUNK_SMOKE,
   WAN_FPS_OPTIONS,
-  WAN_QUALITY_PRESETS,
   WAN_QUALITY_PRESETS_UI,
   WAN_UI_LIMITS,
+  getWanQualityPreset,
   isChunkedVideoEngine,
   planLtxVideo,
   planSvdVideo,
   planWanVideo,
   snapWanFps,
   type VideoEngineId,
+  type WanChunkLengthOption,
   type WanQualityPresetId,
 } from "@/lib/studio/workflow-builder";
 import {
@@ -42,6 +48,7 @@ import {
   WAN_DISTILL_STEPS_MAX,
   WAN_DISTILL_STEPS_MIN,
   coerceWanFast480pGeometry,
+  wantsWanDistill,
 } from "@/lib/studio/wan-distill";
 
 function readImageOrientation(
@@ -133,9 +140,13 @@ export function GenerateForm({
   );
   const [steps, setSteps] = useState<number>(DEFAULT_WAN_FAST_STEPS);
   const [cfg, setCfg] = useState<number>(1);
-  /** Smooth 24: opcjonalny RIFE po stitch — nie jest domyślny ani mandatory. */
+  /** Smooth 24 / Fast+upscale: opcjonalny RIFE po stitch. */
   const [postRife, setPostRife] = useState(false);
   const [postUpscale, setPostUpscale] = useState(false);
+  /** Max klatek/chunk Wan (4n+1). Fast default 81; Quality720 → 65; smoke 33. */
+  const [wanChunkMax, setWanChunkMax] = useState<WanChunkLengthOption>(
+    WAN_CHUNK_PREFERRED_FAST
+  );
   const videoLimits =
     videoEngine === "wan"
       ? WAN_UI_LIMITS
@@ -227,11 +238,11 @@ export function GenerateForm({
   const wsOverlay = useComfyWsProgress(comfyUrl, promptId, wsEnabled);
   const displayProgress = mergeJobProgressWithWs(jobProgress, wsOverlay);
 
-  /** Fast / Smooth + lightx2v — UI+API: tylko 480p, CFG/steps lock na serwerze. */
+  /** Fast / Smooth / Fast+upscale + lightx2v — UI+API: tylko 480p, CFG/steps lock. */
   const wanFastLocked =
     kind === "video" &&
     videoEngine === "wan" &&
-    (qualityPreset === "fast-480p" || qualityPreset === "smooth-24");
+    wantsWanDistill(qualityPreset);
 
   const wanFastGeo = wanFastLocked
     ? coerceWanFast480pGeometry({
@@ -253,8 +264,17 @@ export function GenerateForm({
                   height: wanFastGeo.height,
                   fps,
                   durationSec,
+                  model: wanFastGeo.model,
+                  maxPerChunk: wanChunkMax,
                 }
-              : { width, height, fps, durationSec }
+              : {
+                  width,
+                  height,
+                  fps,
+                  durationSec,
+                  model,
+                  maxPerChunk: wanChunkMax,
+                }
           )
         : videoEngine === "ltx"
           ? planLtxVideo({ width, height, fps, durationSec })
@@ -287,13 +307,13 @@ export function GenerateForm({
   }
 
   function applyWanPreset(id: WanQualityPresetId) {
-    // smooth-24 → Fast + RIFE toggle (Smooth nie jest osobnym presetem UI)
-    const resolved: WanQualityPresetId =
+    // smooth-24 → Fast UI + RIFE (legacy id poza siatką)
+    const uiId: WanQualityPresetId =
       id === "smooth-24" ? DEFAULT_WAN_QUALITY_PRESET : id;
-    const preset = WAN_QUALITY_PRESETS.find((p) => p.id === resolved);
+    const preset = getWanQualityPreset(uiId);
+    const clicked = getWanQualityPreset(id);
     if (!preset) return;
-    const keepRife = id === "smooth-24" || (resolved === "fast-480p" && postRife);
-    setQualityPreset(resolved);
+    setQualityPreset(uiId);
     setVideoEngine("wan");
     setWidth(preset.width);
     setHeight(preset.height);
@@ -302,9 +322,13 @@ export function GenerateForm({
     setCfg(preset.cfg);
     setFaceRestore(preset.faceRestore);
     setFaceRestoreFidelity(preset.faceRestoreFidelity);
-    // Quality* wyłącza RIFE; Fast zachowuje opcjonalny toggle
-    setPostRife(id === "smooth-24" ? true : resolved === "fast-480p" ? keepRife : false);
-    setPostUpscale(false);
+    setPostRife(Boolean(clicked?.postRife ?? preset.postRife));
+    setPostUpscale(Boolean(clicked?.postUpscale ?? preset.postUpscale));
+    setWanChunkMax(
+      uiId === "quality-720p"
+        ? WAN_CHUNK_QUALITY_720
+        : WAN_CHUNK_PREFERRED_FAST
+    );
     setModel(pickWanModel(preset.width >= 1024 || preset.id === "quality-720p"));
     if (!negativePrompt.trim()) {
       setNegativePrompt(DEFAULT_WAN_NEGATIVE);
@@ -695,8 +719,7 @@ export function GenerateForm({
       if (dims && videoEngine === "wan") {
         const geo = coerceWanFast480pGeometry({
           qualityPreset,
-          wanDistillLora:
-            qualityPreset === "fast-480p" || qualityPreset === "smooth-24",
+          wanDistillLora: wantsWanDistill(qualityPreset),
           width: dims.width,
           height: dims.height,
           model,
@@ -806,9 +829,7 @@ export function GenerateForm({
           kind === "video" && videoEngine === "wan"
             ? coerceWanFast480pGeometry({
                 qualityPreset,
-                wanDistillLora:
-                  qualityPreset === "fast-480p" ||
-                  qualityPreset === "smooth-24",
+                wanDistillLora: wantsWanDistill(qualityPreset),
                 width,
                 height,
                 model,
@@ -843,9 +864,7 @@ export function GenerateForm({
                   : steps,
                 cfg: wanFastLocked ? 1 : cfg,
                 qualityPreset,
-                wanDistillLora:
-                  qualityPreset === "fast-480p" ||
-                  qualityPreset === "smooth-24",
+                wanDistillLora: wantsWanDistill(qualityPreset),
               }
             : {}),
         };
@@ -898,6 +917,7 @@ export function GenerateForm({
             faceRestoreFidelity,
             postRife,
             postUpscale,
+            ...(videoEngine === "wan" ? { maxPerChunk: wanChunkMax } : {}),
             ...(startImageSource ? { startImageSource } : {}),
           };
 
@@ -949,9 +969,7 @@ export function GenerateForm({
             body.steps = steps;
             body.cfg = cfg;
             body.qualityPreset = qualityPreset;
-            body.wanDistillLora =
-              qualityPreset === "fast-480p" ||
-              qualityPreset === "smooth-24";
+            body.wanDistillLora = wantsWanDistill(qualityPreset);
           }
           if (
             isChunkedVideoEngine(videoEngine) &&
@@ -1160,52 +1178,112 @@ export function GenerateForm({
             </label>
 
             {videoEngine === "wan" ? (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    checked={postRife}
-                    onChange={(e) => {
-                      setPostRife(e.target.checked);
-                      // Smooth 24 = Fast + RIFE; nie przełączaj na osobny preset
-                      if (
-                        e.target.checked &&
-                        (qualityPreset === "quality-720p" ||
-                          qualityPreset === "quality-24-native")
-                      ) {
-                        applyWanPreset(DEFAULT_WAN_QUALITY_PRESET);
-                        setPostRife(true);
-                      }
-                    }}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="block text-sm text-stone-200">
-                      Smooth 24 (RIFE) — opcjonalnie
+              <>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={postRife}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setPostRife(on);
+                        if (
+                          on &&
+                          (qualityPreset === "quality-720p" ||
+                            qualityPreset === "quality-24-native")
+                        ) {
+                          applyWanPreset("fast-upscale");
+                          return;
+                        }
+                        if (on && postUpscale) {
+                          setQualityPreset("fast-upscale");
+                        } else if (
+                          !on &&
+                          qualityPreset === "fast-upscale" &&
+                          !postUpscale
+                        ) {
+                          setQualityPreset(DEFAULT_WAN_QUALITY_PRESET);
+                        }
+                      }}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block text-sm text-stone-200">
+                        Smooth 24 (RIFE)
+                      </span>
+                      <span className="block text-[11px] text-stone-500">
+                        Gen @16 → RIFE 24 po stitch. Część presetu Fast +
+                        upscale/smooth.
+                      </span>
                     </span>
-                    <span className="block text-[11px] text-stone-500">
-                      Gen @16 → RIFE 24 po stitch. Wyłączone domyślnie; graceful
-                      gdy brak node’a.
+                  </label>
+                  <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={postUpscale}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setPostUpscale(on);
+                        if (
+                          on &&
+                          (qualityPreset === "quality-720p" ||
+                            qualityPreset === "quality-24-native")
+                        ) {
+                          applyWanPreset("fast-upscale");
+                          return;
+                        }
+                        if (on && postRife) {
+                          setQualityPreset("fast-upscale");
+                        } else if (
+                          !on &&
+                          qualityPreset === "fast-upscale" &&
+                          !postRife
+                        ) {
+                          setQualityPreset(DEFAULT_WAN_QUALITY_PRESET);
+                        }
+                      }}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block text-sm text-stone-200">
+                        Post upscale 2× (RealESRGAN)
+                      </span>
+                      <span className="block text-[11px] text-stone-500">
+                        Preferuj vs native Quality 720p (wolne ~40+ min/chunk).
+                      </span>
                     </span>
+                  </label>
+                </div>
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                    Chunk length (klatek / odcinek)
+                  </span>
+                  <select
+                    value={wanChunkMax}
+                    onChange={(e) =>
+                      setWanChunkMax(Number(e.target.value) as WanChunkLengthOption)
+                    }
+                    className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-stone-200"
+                  >
+                    {WAN_CHUNK_LENGTH_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                        {n === WAN_CHUNK_PREFERRED_FAST
+                          ? " — zalecane Fast 480p (mniej reloadów)"
+                          : n === WAN_CHUNK_QUALITY_720
+                            ? " — SAFE Quality 720p"
+                            : n === WAN_CHUNK_SMOKE
+                              ? " — smoke / krótki test"
+                              : " — mid (gdy 81 za ciężkie z LoRA+Sage)"}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[11px] text-stone-500">
+                    Krótki klip (2s @16fps) i tak ≈33 — short smoke bez zmian.
+                    Dłuższe wideo: 81 = mniej chunków / mniej driftu @480p.
                   </span>
                 </label>
-                <label className="flex flex-1 cursor-pointer items-start gap-2.5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5">
-                  <input
-                    type="checkbox"
-                    checked={postUpscale}
-                    onChange={(e) => setPostUpscale(e.target.checked)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="block text-sm text-stone-200">
-                      Post upscale 2×
-                    </span>
-                    <span className="block text-[11px] text-stone-500">
-                      RealESRGAN po stitch (opcjonalnie).
-                    </span>
-                  </span>
-                </label>
-              </div>
+              </>
             ) : null}
 
             <label className="block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
@@ -1655,23 +1733,36 @@ export function GenerateForm({
             {videoRisky ? (
               <p className="text-amber-200/85">
                 {videoEngine === "wan"
-                  ? `Uwaga VRAM (~16 GB): SAFE ${WAN_UI_LIMITS.maxLength} klatek/chunk (4n+1). 720p / dłuższe chunki = więcej offloadu; @24fps/10s ≈3 odcinki.`
+                  ? `Uwaga VRAM (~16 GB): Quality 720p jest wolne — preferuj Fast 480p + RealESRGAN×2 + RIFE. Chunk max ${wanChunkMax} (Fast SAFE ${WAN_UI_LIMITS.maxLength}; 720p comfort ${WAN_UI_LIMITS.comfortLength720}).`
                   : videoEngine === "ltx"
                     ? `Uwaga VRAM (~16 GB): chunk >~${LTX_UI_LIMITS.comfortLength} klatek — Legion SAFE to ${LTX_UI_LIMITS.maxLength} @ 768×512; dłuższe wideo idzie chunkami.`
                     : `Uwaga VRAM (~16 GB): SVD powyżej ~${SVD_UI_LIMITS.comfortFrames} klatek często OOM.`}
               </p>
             ) : null}
-            {videoEngine === "wan" && postRife ? (
+            {videoEngine === "wan" && (postRife || postUpscale) ? (
               <p className="text-teal-100/75">
-                Smooth 24: generacja @ {fps} fps → RIFE po stitch do 24 fps
-                (graceful, jeśli brak node’a na Legionie).
+                Post:{" "}
+                {postRife ? `RIFE ${fps}→24` : null}
+                {postRife && postUpscale ? " + " : null}
+                {postUpscale ? "RealESRGAN×2" : null}
+                {" "}
+                po stitch (graceful gdy brak node’ów). Zalecane vs native Quality
+                720p.
               </p>
+            ) : null}
+            {videoEngine === "wan" ? (
+              <p className="text-amber-200/70">{FLUX_WAN_RAM_THRASH_TIP}</p>
             ) : null}
           </div>
         ) : null}
 
-        {kind === "image" && fluxSelected && imageLimitsNote ? (
-          <p className="text-sm text-amber-200/70">{imageLimitsNote}</p>
+        {kind === "image" && fluxSelected ? (
+          <div className="space-y-1 text-sm">
+            {imageLimitsNote ? (
+              <p className="text-amber-200/70">{imageLimitsNote}</p>
+            ) : null}
+            <p className="text-amber-200/70">{FLUX_WAN_RAM_THRASH_TIP}</p>
+          </div>
         ) : null}
 
         {error || errorDetail ? (
