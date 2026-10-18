@@ -50,26 +50,11 @@ import {
   coerceWanFast480pGeometry,
   wantsWanDistill,
 } from "@/lib/studio/wan-distill";
-
-function readImageOrientation(
-  file: File
-): Promise<{ width: number; height: number } | null> {
-  return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const width = img.naturalWidth || 0;
-      const height = img.naturalHeight || 0;
-      URL.revokeObjectURL(url);
-      resolve(width > 0 && height > 0 ? { width, height } : null);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(null);
-    };
-    img.src = url;
-  });
-}
+import {
+  ImageNormalizeError,
+  UPLOAD_MAX_EDGE,
+  normalizeImageForUpload,
+} from "@/lib/studio/normalize-image-client";
 import {
   mergeJobProgressWithWs,
   useComfyWsProgress,
@@ -690,7 +675,10 @@ export function GenerateForm({
     return () => window.clearInterval(id);
   }, [promptId, pipelineId, status]);
 
-  async function uploadStartFile(file: File) {
+  async function uploadStartFile(
+    file: File,
+    dims?: { width: number; height: number } | null
+  ) {
     setError(null);
     setErrorDetail(null);
     setUploadBusy(true);
@@ -714,9 +702,8 @@ export function GenerateForm({
         subfolder: "",
         type: "input",
       });
-      // Fast 480p: orientacja z wymiarów start image → 832×480 / 480×832
-      const dims = await readImageOrientation(file);
-      if (dims && videoEngine === "wan") {
+      // Fast 480p: orientacja z wymiarów (po bake EXIF) → 832×480 / 480×832
+      if (dims && dims.width > 0 && dims.height > 0 && videoEngine === "wan") {
         const geo = coerceWanFast480pGeometry({
           qualityPreset,
           wanDistillLora: wantsWanDistill(qualityPreset),
@@ -736,36 +723,61 @@ export function GenerateForm({
     }
   }
 
-  function onPickFile(file: File | undefined | null) {
+  async function onPickFile(file: File | undefined | null) {
     if (!file) return;
-    if (!file.type.startsWith("image/") && !/\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
-      setError("Wybierz plik obrazu (PNG, JPEG, WebP, GIF)");
-      return;
+    setError(null);
+    setErrorDetail(null);
+    setUploadBusy(true);
+    try {
+      // Client: bake EXIF + JPEG + max edge; HEIC try-decode; ProRAW → jasny błąd PL
+      const normalized = await normalizeImageForUpload(file);
+      await uploadStartFile(normalized.file, {
+        width: normalized.width,
+        height: normalized.height,
+      });
+    } catch (err) {
+      setUploadBusy(false);
+      if (err instanceof ImageNormalizeError) {
+        setError(err.message);
+        return;
+      }
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Wybierz PNG, JPEG, WebP lub GIF (z iPhone’a: zapisz jako JPEG w Photos)"
+      );
     }
-    void uploadStartFile(file);
   }
 
   async function importGalleryAsStart(item: GalleryItem) {
     setError(null);
     setErrorDetail(null);
     setGalleryError(null);
+    setUploadBusy(true);
     try {
       const res = await fetch(item.url);
       if (!res.ok) {
         throw new Error(`Pobieranie z galerii HTTP ${res.status}`);
       }
       const blob = await res.blob();
-      const file = new File([blob], item.name || "gallery-start.png", {
+      const raw = new File([blob], item.name || "gallery-start.png", {
         type: blob.type || item.mime || "image/png",
       });
+      const normalized = await normalizeImageForUpload(raw);
       // Re-upload do Comfy input — uploadStartFile ustawia source=input + basename
-      await uploadStartFile(file);
+      await uploadStartFile(normalized.file, {
+        width: normalized.width,
+        height: normalized.height,
+      });
       setGalleryOpen(false);
     } catch (err) {
+      setUploadBusy(false);
       setError(
-        err instanceof Error
+        err instanceof ImageNormalizeError
           ? err.message
-          : "Nie udało się zaimportować obrazu z galerii"
+          : err instanceof Error
+            ? err.message
+            : "Nie udało się zaimportować obrazu z galerii"
       );
     }
   }
@@ -1311,10 +1323,10 @@ export function GenerateForm({
                 e.preventDefault();
                 setDragOver(false);
               }}
-              onDrop={(e) => {
+                onDrop={(e) => {
                 e.preventDefault();
                 setDragOver(false);
-                onPickFile(e.dataTransfer.files?.[0]);
+                void onPickFile(e.dataTransfer.files?.[0]);
               }}
               onClick={() => fileInputRef.current?.click()}
               className={`cursor-pointer rounded-xl border border-dashed px-4 py-6 transition ${
@@ -1326,10 +1338,10 @@ export function GenerateForm({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+                accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif,image/heic,image/heif,.heic,.heif"
                 className="hidden"
                 onChange={(e) => {
-                  onPickFile(e.target.files?.[0]);
+                  void onPickFile(e.target.files?.[0]);
                   e.target.value = "";
                 }}
               />
@@ -1355,7 +1367,9 @@ export function GenerateForm({
                         : "Upuść obraz tutaj albo kliknij, by wybrać plik"}
                   </p>
                   <p className="text-xs text-stone-500">
-                    Plik trafia do folderu input ComfyUI i staje się klatką startową SVD.
+                    PNG/JPEG/WebP/GIF → normalizacja (orientacja EXIF + max{" "}
+                    {UPLOAD_MAX_EDGE}px). Z iPhone’a HEIC: spróbujemy zdekodować;
+                    ProRAW/DNG — zapisz jako JPEG w Photos.
                   </p>
                 </div>
               </div>
