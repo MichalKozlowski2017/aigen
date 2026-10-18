@@ -162,6 +162,10 @@ import {
   resolveWanSageAttentionNode,
 } from "./wan-sage";
 import { getWanQualityPreset } from "./video-presets";
+import { comfyHasNodeClass } from "./comfy-client";
+
+/** Node wymagany przez Wan 2.2 MoE (dual KSamplerAdvanced). Brak → Wan 2.1. */
+const WAN22_MOE_REQUIRED_NODE = "KSamplerAdvanced";
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -681,24 +685,41 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
     }
 
     if (w22?.fastMoeReady && w22.highNoise && w22.lowNoise) {
-      const sage = await resolveWanSageAttentionNode();
-      applyWan22FastMoeGraph(graph, {
-        highNoise: w22.highNoise,
-        lowNoise: w22.lowNoise,
-        loraHigh: w22.loraHigh,
-        loraLow: w22.loraLow,
-        seed,
-        sage: sage.available,
-      });
-      usedWan22Moe = true;
-      steps = WAN22_FAST_STEPS;
-      cfg = WAN22_FAST_CFG;
-      samplerName = WAN22_FAST_SAMPLER;
-      scheduler = WAN22_FAST_SCHEDULER;
-      if (chunkIdx === 0) {
-        warnings.push(w22.note);
+      // MoE wymaga KSamplerAdvanced — gdy Legion object_info go nie ma,
+      // spadamy na Wan 2.1 Fast z jasnym komunikatem (nie SVD nonsense).
+      let moeNodeOk = false;
+      try {
+        moeNodeOk = await comfyHasNodeClass(WAN22_MOE_REQUIRED_NODE);
+      } catch {
+        moeNodeOk = false;
       }
-    } else {
+      if (!moeNodeOk) {
+        if (chunkIdx === 0) {
+          warnings.push(
+            `Wan 2.2 MoE niedostępne — brak node’a ${WAN22_MOE_REQUIRED_NODE} w Comfy object_info. Fast = Wan 2.1 + lightx2v (gdy LoRA jest). Zaktualizuj ComfyUI na Legionie.`
+          );
+        }
+      } else {
+        const sage = await resolveWanSageAttentionNode();
+        applyWan22FastMoeGraph(graph, {
+          highNoise: w22.highNoise,
+          lowNoise: w22.lowNoise,
+          loraHigh: w22.loraHigh,
+          loraLow: w22.loraLow,
+          seed,
+          sage: sage.available,
+        });
+        usedWan22Moe = true;
+        steps = WAN22_FAST_STEPS;
+        cfg = WAN22_FAST_CFG;
+        samplerName = WAN22_FAST_SAMPLER;
+        scheduler = WAN22_FAST_SCHEDULER;
+        if (chunkIdx === 0) {
+          warnings.push(w22.note);
+        }
+      }
+    }
+    if (!usedWan22Moe) {
       const distill = await resolveWanDistillLora();
       if (distill.attach && distill.loraName) {
         spliceWanDistillLora(graph, distill.loraName);

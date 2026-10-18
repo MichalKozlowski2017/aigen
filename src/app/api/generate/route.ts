@@ -122,22 +122,25 @@ export async function POST(request: Request) {
       },
     });
   } catch (err) {
-    const attached = (
-      err as Error & {
-        friendly?: ReturnType<typeof friendlyComfyError>;
-        nodeErrors?: unknown;
-        comfyError?: unknown;
-      }
-    ).friendly;
-    const friendly = attached ?? friendlyComfyError(err);
-    const nodeErrors =
-      friendly.nodeErrors ??
-      (err as Error & { nodeErrors?: unknown }).nodeErrors ??
-      null;
-    const comfyError =
-      friendly.comfyError ??
-      (err as Error & { comfyError?: unknown }).comfyError ??
-      null;
+    const e = err as Error & {
+      friendly?: ReturnType<typeof friendlyComfyError>;
+      nodeErrors?: unknown;
+      comfyError?: unknown;
+    };
+    const engineHint =
+      parsed.success && parsed.data.kind === "video"
+        ? (parsed.data.videoEngine ?? "wan")
+        : undefined;
+    const rawForMap =
+      e.nodeErrors != null || e.comfyError != null
+        ? { error: e.comfyError, node_errors: e.nodeErrors }
+        : err;
+    const friendly = friendlyComfyError(
+      rawForMap,
+      engineHint ? { engine: engineHint } : undefined
+    );
+    const nodeErrors = friendly.nodeErrors ?? e.nodeErrors ?? null;
+    const comfyError = friendly.comfyError ?? e.comfyError ?? null;
     return NextResponse.json(
       {
         ok: false,

@@ -1,5 +1,8 @@
 /**
  * Czytelne komunikaty PL dla typowych błędów ComfyUI / custom nodes.
+ *
+ * Ważne: Wan I2V ma zarówno CLIPLoader jak i CLIPVisionLoader — samo „CLIP”
+ * w node_errors NIE oznacza błędu SVD / ImageOnlyCheckpointLoader.
  */
 
 export type FriendlyComfyError = {
@@ -12,6 +15,11 @@ export type FriendlyComfyError = {
   details?: string;
   nodeErrors?: unknown;
   comfyError?: unknown;
+};
+
+export type FriendlyComfyErrorContext = {
+  /** Silnik Studio (gdy znany) — nie zgaduj SVD przy Wan/LTX. */
+  engine?: string;
 };
 
 const VHS_HINT =
@@ -145,14 +153,78 @@ function attachNodeDump(
   };
 }
 
+/** True gdy dump wygląda na SVD (nie Wan CLIPLoader + CLIPVisionLoader). */
+function looksLikeSvdLoaderContext(blob: string, ctx?: FriendlyComfyErrorContext): boolean {
+  if (ctx?.engine === "svd") return true;
+  if (ctx?.engine === "wan" || ctx?.engine === "ltx" || ctx?.engine === "flux") {
+    return false;
+  }
+  return (
+    /SVD_img2vid|ImageOnlyCheckpointLoader|svd_xt/i.test(blob) ||
+    (/CheckpointLoaderSimple/i.test(blob) &&
+      /CLIP_VISION/i.test(blob) &&
+      !/CLIPVisionLoader|WanImageToVideo|UNETLoader/i.test(blob))
+  );
+}
+
+/**
+ * Prawdziwy return_type_mismatch CLIP ↔ CLIP_VISION.
+ * Nie triggeruj na samym class_type „CLIPLoader” / „CLIPVisionLoader” (Wan ma oba).
+ * CLIP_VISION_OUTPUT (Wan) ≠ para CLIP/CLIP_VISION (SVD).
+ */
+function looksLikeClipVisionTypeMismatch(blob: string): boolean {
+  // Isoluj typowe frazy Comfy: "CLIP, CLIP_VISION" / "CLIP != CLIP_VISION" / received_type(CLIP)
+  const pair =
+    /\bCLIP\s*,\s*CLIP_VISION\b|\bCLIP_VISION\s*,\s*CLIP\b|\bCLIP\s*!=\s*CLIP_VISION\b|\bCLIP_VISION\s*!=\s*CLIP\b|received_type\s*\(\s*CLIP\s*\).*CLIP_VISION|received_type\s*\(\s*CLIP_VISION\s*\).*\bCLIP\b/i.test(
+      blob
+    );
+  if (!pair) return false;
+  // Samo CLIP_VISION_OUTPUT bez pary CLIP↔CLIP_VISION — nie SVD
+  if (/CLIP_VISION_OUTPUT/i.test(blob) && !/\bCLIP\s*,\s*CLIP_VISION\b|\bCLIP\s*!=\s*CLIP_VISION\b/i.test(blob)) {
+    return false;
+  }
+  return true;
+}
+
+function clipVisionMismatchFriendly(
+  blob: string,
+  dump: string,
+  ctx?: FriendlyComfyErrorContext
+): FriendlyComfyError {
+  if (looksLikeSvdLoaderContext(blob, ctx)) {
+    return {
+      code: "svd_loader_mismatch",
+      message:
+        "SVD wymaga ImageOnlyCheckpointLoader (CLIP_VISION) — CheckpointLoaderSimple daje CLIP i pada walidacja.",
+      hint:
+        dump ||
+        "Panel wymusza ImageOnlyCheckpointLoader w buildSvdVideoWorkflow.",
+      details: dump || undefined,
+    };
+  }
+  return {
+    code: "type_mismatch",
+    message: "Niezgodność typów CLIP / CLIP_VISION w workflow Comfy.",
+    hint:
+      dump ||
+      extractDetailSnippet(blob) ||
+      "To nie jest automatycznie błąd SVD — sprawdź node_errors poniżej (Wan używa CLIPLoader + CLIPVisionLoader).",
+    details: dump || undefined,
+  };
+}
+
 /**
  * Mapuje surowy błąd Comfy (obiekt / JSON string / Error.message) na komunikat PL.
  * Zawsze przekazuj `{ error, node_errors }` razem.
  */
-export function friendlyComfyError(raw: unknown): FriendlyComfyError {
+export function friendlyComfyError(
+  raw: unknown,
+  ctx?: FriendlyComfyErrorContext
+): FriendlyComfyError {
   const parts = collectText(raw);
   const blob = parts.join("\n");
   const wrap = (f: FriendlyComfyError) => attachNodeDump(f, raw);
+  const dump = summarizeNodeErrors(asRecord(raw)?.node_errors);
 
   if (looksLikeVhsMissing(blob)) {
     return wrap({
@@ -205,7 +277,7 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
   const invalidImage = blob.match(/Invalid image file:\s*(.+)/i);
   if (
     invalidImage ||
-    (/Value not in list/i.test(blob) && /image/i.test(blob))
+    (/Value not in list/i.test(blob) && /\bimage\b/i.test(blob) && /LoadImage/i.test(blob))
   ) {
     const name =
       invalidImage?.[1]?.trim() || extractQuoted(blob) || "podany plik";
@@ -216,17 +288,9 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
     });
   }
 
-  if (
-    /CLIP.*CLIP_VISION|CLIP_VISION.*CLIP|received_type\(CLIP\).*CLIP_VISION/i.test(
-      blob
-    )
-  ) {
-    return wrap({
-      code: "svd_loader_mismatch",
-      message:
-        "SVD wymaga ImageOnlyCheckpointLoader (CLIP_VISION) — CheckpointLoaderSimple daje CLIP i pada walidacja (także po uploadzie!).",
-      hint: "Panel wymusza ImageOnlyCheckpointLoader w buildVideoWorkflow. Zrób hard refresh / poczekaj na deploy Vercel.",
-    });
+  // CLIP ↔ CLIP_VISION: tylko przy prawdziwym type mismatch — i SVD hint tylko gdy kontekst SVD.
+  if (looksLikeClipVisionTypeMismatch(blob)) {
+    return wrap(clipVisionMismatchFriendly(blob, dump, ctx));
   }
 
   if (/return type mismatch|received_type.*mismatch/i.test(blob)) {
@@ -234,8 +298,10 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
       code: "type_mismatch",
       message: "Niezgodność typów połączeń w workflow Comfy.",
       hint:
+        dump ||
         extractDetailSnippet(blob) ||
-        "Sprawdź połączenia node’ów (np. CLIP vs CLIP_VISION).",
+        "Sprawdź połączenia node’ów (szczegóły w node_errors).",
+      details: dump || undefined,
     });
   }
 
@@ -243,22 +309,27 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
     asRecord(raw) ??
     (typeof raw === "string" ? asRecord(tryParseJson(raw)) : null);
 
-  const validation = explainPromptValidationFailure(raw, blob);
-  if (validation) return wrap(validation);
-
+  // missing_node przed ogólną walidacją — nie maskuj przez CLIPLoader w dumpie.
   if (rec?.type === "missing_node_type" || /missing_node_type/i.test(blob)) {
     const classType =
       (asRecord(rec?.extra_info)?.class_type as string | undefined) ||
       (typeof rec?.message === "string"
         ? rec.message.match(/Node '([^']+)'/)?.[1]
         : undefined) ||
+      blob.match(/Node '([^']+)'/)?.[1] ||
       "nieznany";
     return wrap({
       code: "missing_node",
       message: `Brak node’a „${classType}” w ComfyUI (custom node niezaainstalowany albo zła wersja).`,
-      hint: "Zainstaluj brakujący custom node w ComfyUI Manager na Legionie i zrestartuj Comfy.",
+      hint:
+        dump ||
+        "Zainstaluj brakujący custom node w ComfyUI Manager na Legionie i zrestartuj Comfy.",
+      details: dump || undefined,
     });
   }
+
+  const validation = explainPromptValidationFailure(raw, blob, ctx);
+  if (validation) return wrap(validation);
 
   if (typeof raw === "string" && raw.trim() && !raw.trim().startsWith("{")) {
     return wrap({ message: raw.trim() });
@@ -266,12 +337,13 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
 
   if (rec && typeof rec.message === "string" && rec.message.trim()) {
     if (/failed validation/i.test(rec.message)) {
-      const nested = explainPromptValidationFailure(raw, blob);
+      const nested = explainPromptValidationFailure(raw, blob, ctx);
       if (nested) return wrap(nested);
-      const dump = summarizeNodeErrors(rec.node_errors ?? asRecord(raw)?.node_errors);
       return wrap({
         code: "prompt_validation",
-        message: "Walidacja Comfy nie przeszła.",
+        message: dump
+          ? `Walidacja Comfy nie przeszła: ${dump.split("\n")[0]}`
+          : "Walidacja Comfy nie przeszła.",
         hint: dump || "Brak szczegółów node_errors — sprawdź logi Comfy na Legionie.",
         details: dump || undefined,
       });
@@ -284,7 +356,7 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
 
   if (raw instanceof Error && raw.message) {
     const nested = tryParseJson(raw.message);
-    if (nested) return friendlyComfyError(nested);
+    if (nested) return friendlyComfyError(nested, ctx);
     return wrap({ message: raw.message });
   }
 
@@ -295,6 +367,7 @@ export function friendlyComfyError(raw: unknown): FriendlyComfyError {
 }
 
 export function formatFriendlyErrorLines(err: FriendlyComfyError): string {
+  // Preferuj szczegóły node_errors gdy message jest ogólny
   return [err.message, err.hint, err.details].filter(Boolean).join(" ");
 }
 
@@ -315,7 +388,8 @@ function extractDetailSnippet(blob: string): string | undefined {
 
 function explainPromptValidationFailure(
   raw: unknown,
-  blob: string
+  blob: string,
+  ctx?: FriendlyComfyErrorContext
 ): FriendlyComfyError | null {
   const isValidation =
     /prompt outputs failed validation/i.test(blob) ||
@@ -328,7 +402,7 @@ function explainPromptValidationFailure(
 
   if (
     /Invalid image file/i.test(blob) ||
-    (/Value not in list/i.test(blob) && /image/i.test(blob))
+    (/Value not in list/i.test(blob) && /LoadImage|\bimage\b/i.test(blob))
   ) {
     const name =
       blob.match(/Invalid image file:\s*(.+)/i)?.[1]?.trim() ||
@@ -342,22 +416,20 @@ function explainPromptValidationFailure(
     };
   }
 
-  if (/CLIP|CLIP_VISION/i.test(blob)) {
-    return {
-      code: "svd_loader_mismatch",
-      message:
-        "Walidacja: CLIP ≠ CLIP_VISION — użyj ImageOnlyCheckpointLoader dla SVD.",
-      hint: dump || undefined,
-      details: dump || undefined,
-    };
+  // NIE mapuj samego „CLIPLoader” / „CLIPVisionLoader” na SVD — Wan ma oba.
+  if (looksLikeClipVisionTypeMismatch(blob)) {
+    return clipVisionMismatchFriendly(blob, dump, ctx);
   }
 
+  const firstLine = dump.split("\n").find((l) => l.trim().length > 0);
   return {
     code: "prompt_validation",
-    message: "Walidacja Comfy nie przeszła (Prompt outputs failed validation).",
+    message: firstLine
+      ? `Walidacja Comfy nie przeszła: ${firstLine}`
+      : "Walidacja Comfy nie przeszła (Prompt outputs failed validation).",
     hint:
       dump ||
-      "Częste przyczyny: CheckpointLoaderSimple zamiast ImageOnlyCheckpointLoader, albo zła nazwa LoadImage.",
+      "Sprawdź node_errors w logach Comfy na Legionie (częste: zła nazwa modelu / brak custom node).",
     details: dump || undefined,
   };
 }

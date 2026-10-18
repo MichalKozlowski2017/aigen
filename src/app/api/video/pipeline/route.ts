@@ -121,22 +121,25 @@ export async function POST(request: Request) {
       advanceMode: legionWorker ? "legion-worker" : "vercel-best-effort",
     });
   } catch (err) {
-    const attached = (
-      err as Error & {
-        friendly?: ReturnType<typeof friendlyComfyError>;
-        nodeErrors?: unknown;
-        comfyError?: unknown;
-      }
-    ).friendly;
-    const friendly = attached ?? friendlyComfyError(err);
+    const e = err as Error & {
+      friendly?: ReturnType<typeof friendlyComfyError>;
+      nodeErrors?: unknown;
+      comfyError?: unknown;
+    };
+    // Remap with request engine so CLIPLoader dumps never become SVD copy.
+    const rawForMap =
+      e.nodeErrors != null || e.comfyError != null
+        ? { error: e.comfyError, node_errors: e.nodeErrors }
+        : err;
+    const friendly = friendlyComfyError(rawForMap, { engine });
     return NextResponse.json(
       {
         ok: false,
         error: formatFriendlyErrorLines(friendly),
         errorDetail: {
           ...friendly,
-          nodeErrors: friendly.nodeErrors ?? null,
-          comfyError: friendly.comfyError ?? null,
+          nodeErrors: friendly.nodeErrors ?? e.nodeErrors ?? null,
+          comfyError: friendly.comfyError ?? e.comfyError ?? null,
         },
       },
       { status: 502 }
