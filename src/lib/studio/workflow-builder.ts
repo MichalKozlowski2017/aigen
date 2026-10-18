@@ -126,6 +126,20 @@ export {
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
+export {
+  VIDEO_ORIENTATION_LAST_KEY,
+  VIDEO_ORIENTATION_OPTIONS,
+  VIDEO_ORIENTATION_STORAGE_KEY,
+  applyWanOrientationSize,
+  parseVideoOrientationMode,
+  parseVideoOrientationResolved,
+  resolveVideoOrientation,
+  wanFastSize,
+  wanQuality720Size,
+  wanSizeForOrientation,
+  type VideoOrientationMode,
+  type VideoOrientationResolved,
+} from "./video-orientation";
 import {
   WAN_DISTILL_CFG,
   WAN_DISTILL_SAMPLER,
@@ -141,6 +155,7 @@ import {
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
+import { applyWanOrientationSize } from "./video-orientation";
 import {
   WAN_SAGE_ATTENTION_MODE,
   WAN_SAGE_NODE_CLASS,
@@ -578,19 +593,32 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       preset?.useDistillLora === true ||
       wantsWanDistill(body.qualityPreset));
 
-  // Fast + lightx2v = tylko 480p (nie mieszaj UNET 720p z LoRA 480p)
-  // Portrait-aware: 832×480 / 480×832 (#24)
-  const geo = coerceWanFast480pGeometry({
+  // Orientacja UI (Pion/Poziom/Auto) → Fast 480p / Quality 720p pair
+  const oriented = applyWanOrientationSize({
+    orientation: body.orientation,
     qualityPreset: body.qualityPreset,
     wanDistillLora: body.wanDistillLora,
     width: body.width,
     height: body.height,
+  });
+
+  // Fast + lightx2v = tylko 480p (nie mieszaj UNET 720p z LoRA 480p)
+  // Portrait-aware: 832×480 / 480×832 (#24) + wymuszenie z orientation
+  const geo = coerceWanFast480pGeometry({
+    qualityPreset: body.qualityPreset,
+    wanDistillLora: body.wanDistillLora,
+    width: oriented.width,
+    height: oriented.height,
     model: body.model,
+    orientation: body.orientation,
   });
   if (geo.warning) warnings.push(geo.warning);
-  const bodyForPlan: GenerateBody = geo.locked
-    ? { ...body, width: geo.width, height: geo.height, model: geo.model }
-    : body;
+  const bodyForPlan: GenerateBody = {
+    ...body,
+    width: geo.locked ? geo.width : oriented.width,
+    height: geo.locked ? geo.height : oriented.height,
+    ...(geo.locked ? { model: geo.model } : {}),
+  };
 
   const plan = planWanVideo(bodyForPlan);
   const chunkLength =

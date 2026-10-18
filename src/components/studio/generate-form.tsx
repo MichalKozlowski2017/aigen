@@ -22,6 +22,9 @@ import {
   VIDEO_ENGINE_OPTIONS,
   DEFAULT_WAN_FAST_STEPS,
   DEFAULT_WAN_QUALITY_PRESET,
+  VIDEO_ORIENTATION_LAST_KEY,
+  VIDEO_ORIENTATION_OPTIONS,
+  VIDEO_ORIENTATION_STORAGE_KEY,
   WAN_CHUNK_LENGTH_OPTIONS,
   WAN_CHUNK_PREFERRED_FAST,
   WAN_CHUNK_QUALITY_720,
@@ -29,13 +32,20 @@ import {
   WAN_FPS_OPTIONS,
   WAN_QUALITY_PRESETS_UI,
   WAN_UI_LIMITS,
+  applyWanOrientationSize,
   getWanQualityPreset,
   isChunkedVideoEngine,
+  parseVideoOrientationMode,
+  parseVideoOrientationResolved,
   planLtxVideo,
   planSvdVideo,
   planWanVideo,
+  resolveVideoOrientation,
   snapWanFps,
+  wanSizeForOrientation,
   type VideoEngineId,
+  type VideoOrientationMode,
+  type VideoOrientationResolved,
   type WanChunkLengthOption,
   type WanQualityPresetId,
 } from "@/lib/studio/workflow-builder";
@@ -59,6 +69,27 @@ import {
   mergeJobProgressWithWs,
   useComfyWsProgress,
 } from "@/components/studio/use-comfy-ws-progress";
+
+function readStoredOrientation(): {
+  mode: VideoOrientationMode;
+  lastExplicit: VideoOrientationResolved | null;
+} {
+  if (typeof window === "undefined") {
+    return { mode: "auto", lastExplicit: null };
+  }
+  try {
+    return {
+      mode: parseVideoOrientationMode(
+        window.localStorage.getItem(VIDEO_ORIENTATION_STORAGE_KEY)
+      ),
+      lastExplicit: parseVideoOrientationResolved(
+        window.localStorage.getItem(VIDEO_ORIENTATION_LAST_KEY)
+      ),
+    };
+  } catch {
+    return { mode: "auto", lastExplicit: null };
+  }
+}
 
 type JobOutput = {
   filename: string;
@@ -132,18 +163,42 @@ export function GenerateForm({
   const [wanChunkMax, setWanChunkMax] = useState<WanChunkLengthOption>(
     WAN_CHUNK_PREFERRED_FAST
   );
+  /** Pion / Poziom / Auto — localStorage; Auto z obrazu, inaczej last / poziom. */
+  const [orientationMode, setOrientationMode] = useState<VideoOrientationMode>(
+    () => (kind === "video" ? readStoredOrientation().mode : "auto")
+  );
+  const [orientationLast, setOrientationLast] =
+    useState<VideoOrientationResolved | null>(() =>
+      kind === "video" ? readStoredOrientation().lastExplicit : null
+    );
+  const [startImageDims, setStartImageDims] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
   const videoLimits =
     videoEngine === "wan"
       ? WAN_UI_LIMITS
       : videoEngine === "ltx"
         ? LTX_UI_LIMITS
         : SVD_UI_LIMITS;
-  const [width, setWidth] = useState<number>(
-    kind === "video" ? WAN_UI_LIMITS.defaultWidth : 1024
-  );
-  const [height, setHeight] = useState<number>(
-    kind === "video" ? WAN_UI_LIMITS.defaultHeight : 1024
-  );
+  const [width, setWidth] = useState<number>(() => {
+    if (kind !== "video") return 1024;
+    const stored = readStoredOrientation();
+    const resolved = resolveVideoOrientation({
+      mode: stored.mode,
+      lastExplicit: stored.lastExplicit,
+    });
+    return wanSizeForOrientation(DEFAULT_WAN_QUALITY_PRESET, resolved).width;
+  });
+  const [height, setHeight] = useState<number>(() => {
+    if (kind !== "video") return 1024;
+    const stored = readStoredOrientation();
+    const resolved = resolveVideoOrientation({
+      mode: stored.mode,
+      lastExplicit: stored.lastExplicit,
+    });
+    return wanSizeForOrientation(DEFAULT_WAN_QUALITY_PRESET, resolved).height;
+  });
   const [seed, setSeed] = useState(-1);
   const [batch, setBatch] = useState(1);
   const [durationSec, setDurationSec] = useState<number>(
@@ -229,15 +284,65 @@ export function GenerateForm({
     videoEngine === "wan" &&
     wantsWanDistill(qualityPreset);
 
+  const resolvedOrientation =
+    kind === "video" && videoEngine === "wan"
+      ? resolveVideoOrientation({
+          mode: orientationMode,
+          width: startImageDims?.width ?? width,
+          height: startImageDims?.height ?? height,
+          lastExplicit: orientationLast,
+        })
+      : "landscape";
+
+  const wanOrientedSize =
+    kind === "video" && videoEngine === "wan"
+      ? wanSizeForOrientation(qualityPreset, resolvedOrientation)
+      : null;
+
   const wanFastGeo = wanFastLocked
     ? coerceWanFast480pGeometry({
         qualityPreset,
         wanDistillLora: true,
-        width,
-        height,
+        width: wanOrientedSize?.width ?? width,
+        height: wanOrientedSize?.height ?? height,
         model,
+        orientation: orientationMode,
       })
     : null;
+
+  function persistOrientation(
+    mode: VideoOrientationMode,
+    lastExplicit: VideoOrientationResolved | null
+  ) {
+    try {
+      window.localStorage.setItem(VIDEO_ORIENTATION_STORAGE_KEY, mode);
+      if (lastExplicit) {
+        window.localStorage.setItem(VIDEO_ORIENTATION_LAST_KEY, lastExplicit);
+      }
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  function applyOrientationMode(mode: VideoOrientationMode) {
+    const nextLast: VideoOrientationResolved | null =
+      mode === "portrait" || mode === "landscape" ? mode : orientationLast;
+    setOrientationMode(mode);
+    if (mode === "portrait" || mode === "landscape") {
+      setOrientationLast(mode);
+    }
+    persistOrientation(mode, nextLast);
+    if (videoEngine !== "wan") return;
+    const resolved = resolveVideoOrientation({
+      mode,
+      width: startImageDims?.width,
+      height: startImageDims?.height,
+      lastExplicit: nextLast,
+    });
+    const size = wanSizeForOrientation(qualityPreset, resolved);
+    setWidth(size.width);
+    setHeight(size.height);
+  }
 
   const videoPlan =
     kind === "video"
@@ -253,8 +358,8 @@ export function GenerateForm({
                   maxPerChunk: wanChunkMax,
                 }
               : {
-                  width,
-                  height,
+                  width: wanOrientedSize?.width ?? width,
+                  height: wanOrientedSize?.height ?? height,
                   fps,
                   durationSec,
                   model,
@@ -300,8 +405,15 @@ export function GenerateForm({
     if (!preset) return;
     setQualityPreset(uiId);
     setVideoEngine("wan");
-    setWidth(preset.width);
-    setHeight(preset.height);
+    const resolved = resolveVideoOrientation({
+      mode: orientationMode,
+      width: startImageDims?.width ?? preset.width,
+      height: startImageDims?.height ?? preset.height,
+      lastExplicit: orientationLast,
+    });
+    const size = wanSizeForOrientation(uiId, resolved);
+    setWidth(size.width);
+    setHeight(size.height);
     setFps(preset.fps);
     setSteps(preset.steps);
     setCfg(preset.cfg);
@@ -314,7 +426,9 @@ export function GenerateForm({
         ? WAN_CHUNK_QUALITY_720
         : WAN_CHUNK_PREFERRED_FAST
     );
-    setModel(pickWanModel(preset.width >= 1024 || preset.id === "quality-720p"));
+    setModel(
+      pickWanModel(size.width >= 1024 || size.height >= 1024 || uiId === "quality-720p")
+    );
     if (!negativePrompt.trim()) {
       setNegativePrompt(DEFAULT_WAN_NEGATIVE);
     }
@@ -702,17 +816,19 @@ export function GenerateForm({
         subfolder: "",
         type: "input",
       });
-      // Fast 480p: orientacja z wymiarów (po bake EXIF) → 832×480 / 480×832
+      // Orientacja: Auto z obrazu (po bake EXIF); Pion/Poziom wymuszone
       if (dims && dims.width > 0 && dims.height > 0 && videoEngine === "wan") {
-        const geo = coerceWanFast480pGeometry({
+        setStartImageDims(dims);
+        const sized = applyWanOrientationSize({
+          orientation: orientationMode,
           qualityPreset,
           wanDistillLora: wantsWanDistill(qualityPreset),
           width: dims.width,
           height: dims.height,
-          model,
+          lastExplicit: orientationLast,
         });
-        setWidth(geo.width);
-        setHeight(geo.height);
+        setWidth(sized.width);
+        setHeight(sized.height);
       }
     } catch {
       setError("Błąd sieci przy uploadzie");
@@ -837,21 +953,37 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
+        const wanSized =
+          kind === "video" && videoEngine === "wan"
+            ? applyWanOrientationSize({
+                orientation: orientationMode,
+                qualityPreset,
+                wanDistillLora: wantsWanDistill(qualityPreset),
+                width: startImageDims?.width ?? width,
+                height: startImageDims?.height ?? height,
+                lastExplicit: orientationLast,
+              })
+            : null;
         const wanGeo =
           kind === "video" && videoEngine === "wan"
             ? coerceWanFast480pGeometry({
                 qualityPreset,
                 wanDistillLora: wantsWanDistill(qualityPreset),
-                width,
-                height,
+                width: wanSized?.width ?? width,
+                height: wanSized?.height ?? height,
                 model,
+                orientation: orientationMode,
               })
             : null;
         if (wanGeo?.warning) {
           setPollWarning(wanGeo.warning);
         }
-        const submitWidth = wanGeo?.locked ? wanGeo.width : width;
-        const submitHeight = wanGeo?.locked ? wanGeo.height : height;
+        const submitWidth = wanGeo?.locked
+          ? wanGeo.width
+          : (wanSized?.width ?? width);
+        const submitHeight = wanGeo?.locked
+          ? wanGeo.height
+          : (wanSized?.height ?? height);
         const submitModel = wanGeo?.locked ? wanGeo.model : model;
 
         const baseBody: Record<string, unknown> = {
@@ -877,6 +1009,7 @@ export function GenerateForm({
                 cfg: wanFastLocked ? 1 : cfg,
                 qualityPreset,
                 wanDistillLora: wantsWanDistill(qualityPreset),
+                orientation: orientationMode,
               }
             : {}),
         };
@@ -1117,6 +1250,55 @@ export function GenerateForm({
                 </p>
               ) : null}
             </fieldset>
+
+            {videoEngine === "wan" ? (
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                  Orientacja
+                </legend>
+                <div
+                  className="grid grid-cols-3 gap-2"
+                  role="group"
+                  aria-label="Orientacja wideo"
+                >
+                  {VIDEO_ORIENTATION_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => applyOrientationMode(opt.id)}
+                      className={[
+                        "min-h-11 rounded-lg border px-3 py-2 text-center text-sm transition",
+                        orientationMode === opt.id
+                          ? "border-teal-400/50 bg-teal-400/10 text-teal-50"
+                          : "border-studio-border bg-studio-surface text-stone-300 hover:border-studio-border-strong",
+                      ].join(" ")}
+                    >
+                      <span className="block font-medium">{opt.label}</span>
+                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                        {opt.blurb}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  Aktualnie:{" "}
+                  <span className="text-stone-400">
+                    {resolvedOrientation === "portrait" ? "Pion" : "Poziom"}{" "}
+                    {wanOrientedSize
+                      ? `${wanOrientedSize.width}×${wanOrientedSize.height}`
+                      : ""}
+                  </span>
+                  {orientationMode === "auto"
+                    ? startImageDims
+                      ? " · z obrazu startowego"
+                      : orientationLast
+                        ? " · ostatni wybór (brak obrazu)"
+                        : " · domyślnie poziom"
+                    : null}
+                  . Fast: 832×480 / 480×832 · Quality 720p: 1280×720 / 720×1280.
+                </p>
+              </fieldset>
+            ) : null}
 
             {videoEngine === "wan" ? (
               <fieldset className="space-y-2">
@@ -1560,8 +1742,12 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={wanFastGeo?.locked ? wanFastGeo.width : width}
-              disabled={wanFastLocked}
+              value={
+                wanFastGeo?.locked
+                  ? wanFastGeo.width
+                  : (wanOrientedSize?.width ?? width)
+              }
+              disabled={wanFastLocked || Boolean(wanOrientedSize)}
               onChange={(e) => setWidth(Number(e.target.value))}
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
@@ -1584,8 +1770,12 @@ export function GenerateForm({
                       : 64
                   : 64
               }
-              value={wanFastGeo?.locked ? wanFastGeo.height : height}
-              disabled={wanFastLocked}
+              value={
+                wanFastGeo?.locked
+                  ? wanFastGeo.height
+                  : (wanOrientedSize?.height ?? height)
+              }
+              disabled={wanFastLocked || Boolean(wanOrientedSize)}
               onChange={(e) => setHeight(Number(e.target.value))}
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />

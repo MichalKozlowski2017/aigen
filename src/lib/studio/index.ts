@@ -55,4 +55,18 @@ export {
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";
+export {
+  VIDEO_ORIENTATION_LAST_KEY,
+  VIDEO_ORIENTATION_OPTIONS,
+  VIDEO_ORIENTATION_STORAGE_KEY,
+  applyWanOrientationSize,
+  parseVideoOrientationMode,
+  parseVideoOrientationResolved,
+  resolveVideoOrientation,
+  wanFastSize,
+  wanQuality720Size,
+  wanSizeForOrientation,
+  type VideoOrientationMode,
+  type VideoOrientationResolved,
+} from "./video-orientation";
 export { runVideoPostProcess } from "./video-postprocess";

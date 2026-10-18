@@ -120,7 +120,7 @@ export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
     id: "quality-720p",
     label: "Quality 720p",
     blurb:
-      "WOLNE (~40+ min/chunk @16GB) · bez LoRA · 1280×720 · preferuj Fast + upscale/smooth",
+      "WOLNE (~40+ min/chunk @16GB) · bez LoRA · 1280×720 / 720×1280 · preferuj Fast + upscale/smooth",
     width: WAN_UI_LIMITS.qualityWidth,
     height: WAN_UI_LIMITS.qualityHeight,
     fps: 16,

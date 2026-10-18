@@ -52,11 +52,16 @@ export function clampWanDistillSteps(steps: number | undefined): number {
 /**
  * Portrait gdy wysokość > szerokość (wymiary UI / start image).
  * Równe / landscape → false (domyślnie 832×480).
+ * `orientation` (Pion/Poziom) wymusza wynik; `auto` / brak → z wymiarów.
  */
 export function isWanFastPortrait(options: {
   width?: number;
   height?: number;
+  /** auto = z wymiarów; portrait/landscape = wymuszenie z UI */
+  orientation?: "auto" | "portrait" | "landscape";
 }): boolean {
+  if (options.orientation === "portrait") return true;
+  if (options.orientation === "landscape") return false;
   const w = options.width ?? 0;
   const h = options.height ?? 0;
   if (w <= 0 || h <= 0) return false;
@@ -133,7 +138,7 @@ export function wantsWanDistill(qualityPreset: string | undefined): boolean {
 /**
  * Fast + distill LoRA = wyłącznie 480p (UNET 480p).
  * Zachowuje orientację: landscape 832×480, portrait 480×832
- * (z width/height UI albo wymiarów start image).
+ * (z width/height UI, wymiarów start image, albo wymuszenia Pion/Poziom).
  * Coerce model; warning gdy API prosiło o 720p.
  */
 export function coerceWanFast480pGeometry(options: {
@@ -142,6 +147,8 @@ export function coerceWanFast480pGeometry(options: {
   width?: number;
   height?: number;
   model?: string;
+  /** UI: Auto / Pion / Poziom — portrait/landscape wymusza geometrię */
+  orientation?: "auto" | "portrait" | "landscape";
 }): {
   width: number;
   height: number;
@@ -154,18 +161,19 @@ export function coerceWanFast480pGeometry(options: {
     options.wanDistillLora !== false &&
     (options.wanDistillLora === true || wantsWanDistill(options.qualityPreset));
 
+  const portrait = isWanFastPortrait(options);
+
   if (!distillOn) {
     return {
       width: options.width ?? WAN_FAST_WIDTH,
       height: options.height ?? WAN_FAST_HEIGHT,
       model: options.model?.trim() || DEFAULT_WAN_UNET,
       locked: false,
-      portrait: isWanFastPortrait(options),
+      portrait,
       warning: null,
     };
   }
 
-  const portrait = isWanFastPortrait(options);
   const width = portrait ? WAN_FAST_PORTRAIT_WIDTH : WAN_FAST_WIDTH;
   const height = portrait ? WAN_FAST_PORTRAIT_HEIGHT : WAN_FAST_HEIGHT;
   const wanted720 = looksLikeWan720(options);

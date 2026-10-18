@@ -62,7 +62,11 @@ export default async function StudioVideoPage() {
           <strong className="font-medium text-stone-300">
             Fast + upscale/smooth
           </strong>{" "}
-          (RealESRGAN×2 + RIFE). Quality 720p = wolne (~40+ min/chunk).
+          (RealESRGAN×2 + RIFE). Orientacja:{" "}
+          <strong className="font-medium text-stone-300">
+            Auto / Pion / Poziom
+          </strong>
+          . Quality 720p = wolne (~40+ min/chunk).
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}
