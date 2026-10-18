@@ -102,43 +102,28 @@ export async function stitchComfyClips(options: {
     );
 
     const stitched = path.join(tmp, "stitched.mp4");
-    // Najpierw -c copy (szybko, bez generacji); fallback re-encode CRF 18
-    try {
-      await runFfmpeg([
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listFile,
-        "-c",
-        "copy",
-        "-an",
-        stitched,
-      ]);
-    } catch {
-      await runFfmpeg([
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listFile,
-        "-c:v",
-        "libx264",
-        "-crf",
-        "18",
-        "-preset",
-        "fast",
-        "-pix_fmt",
-        "yuv420p",
-        "-an",
-        "-r",
-        String(fps),
-        stitched,
-      ]);
+    // -c copy tylko gdy codec/rozmiar/pix_fmt się zgadzają; inaczej CRF (preset fast)
+    const canCopy = await clipsCompatibleForCopy(trimmed);
+    if (canCopy) {
+      try {
+        await runFfmpeg([
+          "-y",
+          "-f",
+          "concat",
+          "-safe",
+          "0",
+          "-i",
+          listFile,
+          "-c",
+          "copy",
+          "-an",
+          stitched,
+        ]);
+      } catch {
+        await runFfmpeg(concatEncodeArgs(listFile, fps, stitched));
+      }
+    } else {
+      await runFfmpeg(concatEncodeArgs(listFile, fps, stitched));
     }
 
     const buf = await fs.readFile(stitched);
@@ -202,6 +187,71 @@ async function uploadVideoToComfy(
     subfolder: json.subfolder ?? subfolder,
     type: json.type ?? type,
   };
+}
+
+/** libx264 CRF — jakość OK, preset fast (nie ultrafast/slow). */
+function concatEncodeArgs(
+  listFile: string,
+  fps: number,
+  out: string
+): string[] {
+  return [
+    "-y",
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    listFile,
+    "-c:v",
+    "libx264",
+    "-crf",
+    "18",
+    "-preset",
+    "fast",
+    "-pix_fmt",
+    "yuv420p",
+    "-an",
+    "-r",
+    String(fps),
+    out,
+  ];
+}
+
+/** fingerprint: codec|pix_fmt|WxH — wystarczy do bezpiecznego concat -c copy */
+async function probeVideoFingerprint(file: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const child = spawn(resolveFfmpegBin(), ["-hide_banner", "-i", file], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let err = "";
+    child.stderr.on("data", (d: Buffer) => {
+      err += d.toString();
+    });
+    child.on("error", () => resolve(null));
+    child.on("close", () => {
+      // np. Video: h264 (High) (avc1 / 0x31637661), yuv420p, 832x480, …
+      const m = err.match(
+        /Video:\s*([^,\s]+).*?,\s*([^,({\s]+).*?,\s*(\d+)x(\d+)/i
+      );
+      if (!m) {
+        resolve(null);
+        return;
+      }
+      resolve(
+        `${m[1]!.toLowerCase()}|${m[2]!.toLowerCase()}|${m[3]}x${m[4]}`
+      );
+    });
+  });
+}
+
+async function clipsCompatibleForCopy(files: string[]): Promise<boolean> {
+  if (files.length === 0) return false;
+  if (files.length === 1) return true;
+  const prints = await Promise.all(files.map(probeVideoFingerprint));
+  const first = prints[0];
+  if (!first) return false;
+  return prints.every((p) => p === first);
 }
 
 function resolveFfmpegBin(): string {
