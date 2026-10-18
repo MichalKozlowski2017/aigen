@@ -8,9 +8,10 @@
  * Fast path prefers MoE when high+low UNETs and (LoRA pair OR fused distill
  * UNETs) are on Comfy; otherwise falls back to Wan 2.1 + lightx2v 480p.
  *
- * Graph: 2× UNETLoader → optional LoRA → ModelSamplingSD3(shift=5) →
- * optional PathchSageAttentionKJ → KSamplerAdvanced high (0→2) →
- * KSamplerAdvanced low (2→100) → VAEDecode. CFG=1, euler/simple, 4 steps.
+ * Graph: 2× UNETLoader → optional LoRA → optional PathchSageAttentionKJ →
+ * ModelSamplingSD3(shift=5) → KSamplerAdvanced high (0→2) →
+ * KSamplerAdvanced low (2→4) → VAEDecode. CFG=1, euler/simple, 4 steps.
+ * Aligns with Comfy-Org video_wan2_2_14B_i2v + lightx2v 4-step NativeComfy.
  */
 import { listComfyModelFolder } from "./comfy-client";
 
@@ -53,8 +54,12 @@ export const WAN22_FAST_SHIFT = 5;
 export const WAN22_FAST_LORA_STRENGTH = 1;
 /** High-noise stage: steps 0 → split (of total 4). */
 export const WAN22_FAST_HIGH_END_STEP = 2;
-/** Low-noise stage: start at split → 100 (finish). */
-export const WAN22_FAST_LOW_END_STEP = 100;
+/**
+ * Low-noise stage end (lightx2v NativeComfy: start=2, end=4 of steps=4).
+ * Prefer total steps over the old “100 = finish” hack — same effective
+ * range when steps=4, clearer for Comfy validators / schedules.
+ */
+export const WAN22_FAST_LOW_END_STEP = WAN22_FAST_STEPS;
 
 export type Wan22Detect = {
   /** true gdy high+low UNET widoczne w Comfy */
@@ -215,7 +220,7 @@ export async function detectWan22Availability(): Promise<Wan22Detect> {
     loraLow: fusedDistill && !loraAvailable ? null : loraLow,
     usingFallback21: false,
     note: fusedDistill
-      ? "Wan 2.2 Fast MoE (fused lightx2v distill UNETs) — high+low, 4-step, CFG=1, euler, shift=5."
-      : "Wan 2.2 Fast MoE (FP8 + lightx2v LoRA) — high+low, 4-step, CFG=1, euler, shift=5.",
+      ? "Wan 2.2 Fast MoE (fused lightx2v distill UNETs) — high+low, 4-step (0→2/2→4), CFG=1, euler, shift=5."
+      : "Wan 2.2 Fast MoE (FP8 + lightx2v LoRA) — high+low, 4-step (0→2/2→4), CFG=1, euler, shift=5.",
   };
 }

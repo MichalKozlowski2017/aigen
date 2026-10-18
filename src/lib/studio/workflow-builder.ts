@@ -748,8 +748,9 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
 
   // Chunk >0: drop overlapping start frame in Comfy (ImageFromBatch index 1)
   // zanim VHS — ffmpeg stitch może wtedy -c copy bez trim/re-encode.
+  // length must be >=1 (Comfy rejects length=-1 / “rest of batch”).
   if (chunkIdx > 0) {
-    spliceSkipOverlapFrames(graph, "21", WAN_CHUNK_OVERLAP);
+    spliceSkipOverlapFrames(graph, "21", chunkLength, WAN_CHUNK_OVERLAP);
   }
 
   if (body.ltxSaveTail) {
@@ -757,7 +758,7 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
       class_type: "ImageFromBatch",
       inputs: {
         image: [imageSourceForTail, 0],
-        batch_index: -1,
+        batch_index: Math.max(0, chunkLength - 1),
         length: 1,
       },
     };
@@ -775,11 +776,12 @@ async function buildWanVideoWorkflow(body: GenerateBody): Promise<{
 
 /**
  * Wan 2.2 Fast MoE — dual UNET (high/low) + optional lightx2v LoRAs +
- * ModelSamplingSD3(shift=5) + optional Sage KJ + 2× KSamplerAdvanced.
- * High: steps 0→2 of 4, leftover noise. Low: 2→100, no add noise.
+ * optional Sage KJ → ModelSamplingSD3(shift=5) + 2× KSamplerAdvanced.
+ * High: steps 0→2 of 4, leftover noise. Low: 2→4, no add noise.
+ * Chain order matches Comfy-Org / PainterI2V lightx2v: LoRA → Sage → SD3.
  * VAEDecode czyta z low sampler (61).
  */
-function applyWan22FastMoeGraph(
+export function applyWan22FastMoeGraph(
   graph: WorkflowGraph,
   opts: {
     highNoise: string;
@@ -829,25 +831,10 @@ function applyWan22FastMoeGraph(
     lowModel = ["58", 0];
   } else {
     delete graph["55"];
+    delete graph["58"];
   }
 
-  graph["54"] = {
-    class_type: "ModelSamplingSD3",
-    inputs: {
-      model: highModel,
-      shift: WAN22_FAST_SHIFT,
-    },
-  };
-  graph["60"] = {
-    class_type: "ModelSamplingSD3",
-    inputs: {
-      model: lowModel,
-      shift: WAN22_FAST_SHIFT,
-    },
-  };
-  highModel = ["54", 0];
-  lowModel = ["60", 0];
-
+  // Sage before ModelSamplingSD3 (Comfy-Org / PainterI2V lightx2v order)
   if (opts.sage) {
     graph["56"] = {
       class_type: WAN_SAGE_NODE_CLASS,
@@ -869,7 +856,25 @@ function applyWan22FastMoeGraph(
     lowModel = ["59", 0];
   } else {
     delete graph["56"];
+    delete graph["59"];
   }
+
+  graph["54"] = {
+    class_type: "ModelSamplingSD3",
+    inputs: {
+      model: highModel,
+      shift: WAN22_FAST_SHIFT,
+    },
+  };
+  graph["60"] = {
+    class_type: "ModelSamplingSD3",
+    inputs: {
+      model: lowModel,
+      shift: WAN22_FAST_SHIFT,
+    },
+  };
+  highModel = ["54", 0];
+  lowModel = ["60", 0];
 
   graph["3"] = {
     class_type: "KSamplerAdvanced",
@@ -1007,7 +1012,7 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
 
   // Chunk >0: drop overlapping start frame przed VHS (jak Wan)
   if (chunkIdx > 0) {
-    spliceSkipOverlapFrames(graph, "21", LTX_CHUNK_OVERLAP);
+    spliceSkipOverlapFrames(graph, "21", chunkLength, LTX_CHUNK_OVERLAP);
   }
 
   // Ostatnia klatka → input kolejnego chunka (Legion: last-frame continue)
@@ -1016,7 +1021,7 @@ function buildLtxVideoWorkflow(body: GenerateBody): WorkflowGraph {
       class_type: "ImageFromBatch",
       inputs: {
         image: [imageSourceForTail, 0],
-        batch_index: -1,
+        batch_index: Math.max(0, chunkLength - 1),
         length: 1,
       },
     };
@@ -1070,23 +1075,45 @@ function spliceFaceRestore(
  * Chunk continue: pomiń pierwsze `overlap` klatek (duplikat last-frame z cN-1)
  * przed VHS_VideoCombine — unikamy ffmpeg trim + re-encode przy stitch.
  * Tail (SaveImage last frame) nadal bierze z pełnego batcha decode/face.
+ *
+ * Comfy core ImageFromBatch: length min=1 — never pass -1 (“rest of batch”).
+ * When batchLength - overlap < 1 (single-frame edge), skip the splice.
  */
-function spliceSkipOverlapFrames(
+export function spliceSkipOverlapFrames(
   graph: WorkflowGraph,
   combineNodeId: string,
+  batchLength: number,
   overlap: number = 1
 ): void {
   if (overlap <= 0) return;
   const combine = graph[combineNodeId];
   if (!combine?.inputs?.images) return;
+  const keep = Math.floor(batchLength) - Math.floor(overlap);
+  if (!Number.isFinite(keep) || keep < 1) {
+    // Single-frame / empty after trim — leave full batch wired to VHS
+    delete graph["24"];
+    return;
+  }
   const images = combine.inputs.images as [string, number];
   graph["24"] = {
     class_type: "ImageFromBatch",
     inputs: {
       image: images,
-      batch_index: overlap,
-      length: -1,
+      batch_index: Math.floor(overlap),
+      length: keep,
     },
   };
   combine.inputs.images = ["24", 0];
+}
+
+/** Collect ImageFromBatch length inputs (for smoke / CI asserts). */
+export function imageFromBatchLengths(graph: WorkflowGraph): number[] {
+  const out: number[] = [];
+  for (const node of Object.values(graph)) {
+    if (node?.class_type === "ImageFromBatch") {
+      const len = node.inputs?.length;
+      if (typeof len === "number") out.push(len);
+    }
+  }
+  return out;
 }
