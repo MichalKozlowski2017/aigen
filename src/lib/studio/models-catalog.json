@@ -220,25 +220,25 @@
     "vramHintGb": 1
   },
   {
-    "id": "wan22-i2v-high-fp8-distill",
-    "name": "Wan 2.2 I2V A14B high-noise FP8 lightx2v 4-step (ComfyUI)",
+    "id": "wan22-i2v-high-fp8",
+    "name": "Wan 2.2 I2V high-noise 14B FP8 scaled",
     "type": "unet",
-    "filename": "wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "filename": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
     "targetSubdir": "diffusion_models",
-    "downloadUrl": "https://huggingface.co/lightx2v/Wan2.2-Distill-Models/resolve/main/wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
-    "sizeHint": "~15 GB",
-    "notes": "Legion-only download. Studio: detect + fallback 2.1 (MoE graph not wired). Para z low-noise. Nie pobieraj na cloud VM.",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+    "sizeHint": "~13.3 GB",
+    "notes": "Legion SoT. Fast MoE high stage + lightx2v LoRA. Nie pobieraj na cloud VM.",
     "vramHintGb": 16
   },
   {
-    "id": "wan22-i2v-low-fp8-distill",
-    "name": "Wan 2.2 I2V A14B low-noise FP8 lightx2v 4-step (ComfyUI)",
+    "id": "wan22-i2v-low-fp8",
+    "name": "Wan 2.2 I2V low-noise 14B FP8 scaled",
     "type": "unet",
-    "filename": "wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
+    "filename": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
     "targetSubdir": "diffusion_models",
-    "downloadUrl": "https://huggingface.co/lightx2v/Wan2.2-Distill-Models/resolve/main/wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors",
-    "sizeHint": "~15 GB",
-    "notes": "Legion-only. Para z high-noise dla Fast 2.2 scaffold. Studio używa 2.1 aż follow-up podepnie graph.",
+    "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+    "sizeHint": "~13.3 GB",
+    "notes": "Legion SoT. Fast MoE low stage + lightx2v LoRA. Para z high-noise.",
     "vramHintGb": 16
   },
   {
@@ -249,7 +249,7 @@
     "targetSubdir": "loras",
     "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
     "sizeHint": "~1.23 GB",
-    "notes": "Opcjonalna LoRA 4-step (Comfy-Org). Detect w wan22.ts; Fast path nadal 2.1.",
+    "notes": "Fast MoE 4-step (Comfy-Org). Wymagana para z low-noise LoRA.",
     "vramHintGb": 2
   },
   {
@@ -260,7 +260,7 @@
     "targetSubdir": "loras",
     "downloadUrl": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
     "sizeHint": "~1.23 GB",
-    "notes": "Para z high-noise LoRA. Legion download; cloud VM — nie.",
+    "notes": "Para z high-noise LoRA. Legion SoT; cloud VM — nie.",
     "vramHintGb": 2
   }
 ]

@@ -118,20 +118,24 @@ Na ~16 GB VRAM zwykle **szybciej i stabilniej**: preset **Fast + upscale/smooth*
 
 Flux + Wan łącznie ~**73 GB** wag vs ~**64 GB** RAM Legion — przełączanie Obraz↔Wideo = thrash. Odpalaj wideo w serii (albo restart Comfy przed zmianą silnika). Tip w UI na obu stronach.
 
-### Wan 2.2 (scaffold — download tylko na Legionie)
+### Wan 2.2 Fast MoE (preferowane gdy pliki na Legionie)
 
-Studio **wykrywa** pliki Wan 2.2 i **zostaje przy 2.1** Fast aż follow-up podepnie dual-noise MoE graph. **Nie pobieraj multi-GB na cloud VM.**
+Studio **preferuje Wan 2.2 Fast MoE** gdy wykryje high+low UNET **i** lightx2v LoRA pair (albo fused distill UNETs). Inaczej → Wan 2.1 Fast + LoRA 480p. **Nie pobieraj multi-GB na cloud VM.**
 
-Filenames (Legion → `diffusion_models/` / `loras/`):
+Graph: 2× `UNETLoader` → `LoraLoaderModelOnly` (high/low) → `ModelSamplingSD3` (shift **5**) → opcjonalnie `PathchSageAttentionKJ` → `KSamplerAdvanced` high (0→2) → low (2→100) → decode. **Steps 4 · CFG=1 · euler/simple.** Geometria Fast: 832×480 / 480×832 (portrait z #24).
+
+Filenames (Legion SoT → `diffusion_models/` / `loras/`):
 
 | Rola | Plik |
 |------|------|
-| Fast distill FP8 high | `wan2.2_i2v_A14b_high_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors` |
-| Fast distill FP8 low | `wan2.2_i2v_A14b_low_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors` |
+| I2V FP8 high | `wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors` |
+| I2V FP8 low | `wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors` |
 | LoRA 4-step high | `wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors` |
 | LoRA 4-step low | `wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors` |
 
-HF: [lightx2v/Wan2.2-Distill-Models](https://huggingface.co/lightx2v/Wan2.2-Distill-Models), [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged). VAE/CLIP: te same co 2.1 (`wan_2.1_vae`, `umt5_xxl_fp8`, `clip_vision_h`).
+Opcjonalnie fused distill (bez LoRA): `wan2.2_i2v_A14b_{high,low}_noise_scaled_fp8_e4m3_lightx2v_4step_comfyui.safetensors`.
+
+HF: [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged), [lightx2v/Wan2.2-Distill-Models](https://huggingface.co/lightx2v/Wan2.2-Distill-Models). VAE/CLIP: te same co 2.1 (`wan_2.1_vae`, `umt5_xxl_fp8`, `clip_vision_h`).
 
 ### Comfy na Legionie (`--fast` + Sage via KJNodes)
 
@@ -171,6 +175,7 @@ Endpointy:
 | `historia`/`internal/files` fail, ale galeria działa | OK — UI idzie z indeksu; flaky endpointy są pomijane gdy indeks ma wpisy |
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
-| Fast bez przyspieszenia | brak LoRA lightx2v w `loras/` — fallback klasyczny Fast |
+| Fast bez przyspieszenia | brak Wan 2.2 MoE / brak LoRA lightx2v 2.1 — fallback klasyczny Fast |
+| Fast idzie 2.1 mimo Wan 2.2 na dysku | brak pary LoRA high+low (albo fused distill) — dołóż LoRAs |
 | Fast + 720p „źle wygląda” | Fast jest zablokowany do 480p; Quality 720p = bez LoRA |
 | Pipeline stoi po chunku 1 | `after()` / GET advance / durable JSON; **nie** włączaj `PIPELINE_LEGION_WORKER=1` „na zapas” |
