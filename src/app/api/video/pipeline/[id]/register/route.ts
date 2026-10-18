@@ -13,9 +13,9 @@ export const maxDuration = 300;
 /**
  * POST /api/video/pipeline/[id]/register
  *
- * Rejestracja / claim pipeline przez Legion worker (source of truth).
- * Kickuje jedną pętlę advance w tle (bez multiplikacji na browser poll).
- * Panel z `PIPELINE_LEGION_WORKER=1` nie advance’uje na GET — worker woła tu.
+ * Opcjonalny claim/kick (eksperymentalny tryb Legion). Bez osobnego auth
+ * poza STUDIO_PASSWORD — nie włączać PIPELINE_LEGION_WORKER jako default.
+ * Kick: awaited after() pętla advance (bez multiplikacji na browser poll).
  */
 export async function POST(
   _request: Request,
@@ -49,8 +49,8 @@ export async function POST(
     shouldKickPipelineBackground(pipeline.id, 5_000);
 
   if (kicked) {
-    after(() => {
-      kickPipelineBackground(pipeline.id, 240_000);
+    after(async () => {
+      await kickPipelineBackground(pipeline.id, 240_000);
     });
   }
 

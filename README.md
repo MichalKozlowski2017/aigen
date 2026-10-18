@@ -53,7 +53,7 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel: `/history` + indeks w Comfy input |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |
-| `PIPELINE_LEGION_WORKER` | `1` = Legion worker orkiestruje chunki; panel GET tylko status |
+| `PIPELINE_LEGION_WORKER` | **Zostaw wyłączone.** Eksperymentalne; nie włączać domyślnie (register bez osobnego auth). Opcjonalny `aigen-queue-worker.py` na Legionie jest osobny i nie wymaga tej flagi. |
 
 ## Skrypty
 

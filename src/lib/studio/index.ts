@@ -48,6 +48,10 @@ export {
 } from "./video-presets";
 export {
   WAN_DISTILL_LORA_FILENAME,
+  WAN_DISTILL_STEPS_MAX,
+  WAN_DISTILL_STEPS_MIN,
+  clampWanDistillSteps,
+  coerceWanFast480pGeometry,
   resolveWanDistillLora,
   wantsWanDistill,
 } from "./wan-distill";

@@ -50,14 +50,13 @@ Na Vercel ustaw:
 ```env
 COMFYUI_URL=https://twoj-tunnel.example
 STUDIO_PASSWORD=...
-# Gdy Legion queue worker orkiestruje chunki (zalecane na dłuższe klipy):
-# PIPELINE_LEGION_WORKER=1
+# PIPELINE_LEGION_WORKER — zostaw wyłączone (patrz §6). Nie włączać domyślnie.
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
 - **Galeria:** `/history` + trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe historii) + stock `/internal/files/output` (tylko root) + `/api/comfy-view`. Po restarcie Comfy z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
-- **Pipeline:** patrz §6 — Legion worker SoT; Vercel GET = status + best-effort.
+- **Pipeline:** patrz §6 — awaited `after()` + GET advance + durable JSON; flaga Legion opcjonalna/eksperymentalna.
 
 ## 3. Uruchomienie razem
 
@@ -97,24 +96,38 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 ### Wan Fast (distill LoRA)
 
 - Plik: `models/loras/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors`
-- Preset **Fast**: steps 4–6, CFG≈1, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje
+- Preset **Fast**: **tylko 480p** (832×480, UNET 480p). Steps **4–8**, **CFG=1**, sampler `euler`, node `LoraLoaderModelOnly` gdy plik istnieje — API/UI nie nadpiszą (np. cfg=6 / 720p → coerce + warning)
 - Brak LoRA na Comfy → graceful fallback (steps ~10, CFG 6, bez LoRA) + ostrzeżenie w UI
-- **Quality** = bez LoRA / więcej steps; **Native 24** = experimental (preferuj Smooth 24 / RIFE)
+- **Quality 720p** = bez Fast LoRA / więcej steps; **Native 24** = experimental (preferuj Smooth 24 / RIFE)
+
+### Comfy na Legionie (opcjonalnie Sage / --fast)
+
+AIGen nie uruchamia Comfy — tylko woła API. Na Legionie możesz dodać flagi przy starcie (osobno od panelu):
+
+```bash
+python main.py --listen 127.0.0.1 --port 8188 --fast
+# opcjonalnie SageAttention jeśli zainstalowane w venv Comfy (zależnie od buildu):
+# python main.py --listen 127.0.0.1 --port 8188 --use-sage-attention
+```
+
+Sprawdź `python main.py --help` na swojej wersji Comfy — nazwy flag bywają różne.
 
 ## 6. Pipeline chunków (Wan/LTX)
 
-**Legion worker jest source of truth** dla kolejnych chunków (c1…stitch). Browser poll i Vercel GET służą do **statusu**; advance na GET to tylko best-effort gdy nie ma workera.
+**Domyślnie (zalecane):** Vercel `after()` **awaits** pętlę `kickPipelineBackground` (nie fire-and-forget), `GET /api/video/pipeline/[id]` robi `advancePipeline`, stan leży w Comfy `input/aigen-pipeline-*.json`. Browser poll (~2s) to UI status — **nie** jedyne źródło postępu; po cold start klient wznawia z checkpointu.
+
+**`PIPELINE_LEGION_WORKER=1`:** zostaw **wyłączone**. Tryb eksperymentalny (panel GET bez advance; `POST …/register` bez osobnego auth poza `STUDIO_PASSWORD`). Nie mylić z niezależnym skryptem `aigen-queue-worker.py` na Legionie — ten może działać osobno i **nie** wymaga tej flagi.
 
 | Tryb | ENV | Zachowanie |
 |------|-----|------------|
-| Best-effort (domyślnie) | brak / `PIPELINE_LEGION_WORKER` wyłączone | `POST` start + jedna pętla `after()`; `GET` advance + kick max co ~45s (bez multiplikacji na każde poll) |
-| Legion worker | `PIPELINE_LEGION_WORKER=1` | Panel: `GET` tylko czyta stan (bez advance). Worker: `POST /api/video/pipeline/[id]/register` kickuje orkiestrację |
+| Best-effort (domyślnie) | brak / flaga wyłączona | `POST` start + **awaited** `after()` kick; `GET` advance + kick max co ~45s; durable JSON |
+| Legion worker (eksperymentalne) | `PIPELINE_LEGION_WORKER=1` | Panel: `GET` tylko czyta. Worker: `POST …/register` — **nie** ustawiaj jako default |
 
 Endpointy:
 
 - `POST /api/video/pipeline` — start + enqueue c0
-- `GET /api/video/pipeline/[id]` — status (+ best-effort advance jeśli nie Legion)
-- `POST /api/video/pipeline/[id]/register` — claim / kick dla Legion workera
+- `GET /api/video/pipeline/[id]` — status (+ advance jeśli nie Legion)
+- `POST /api/video/pipeline/[id]/register` — claim / kick (opcjonalny worker)
 
 ## 7. Troubleshooting
 
@@ -125,3 +138,5 @@ Endpointy:
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
 | Fast bez przyspieszenia | brak LoRA lightx2v w `loras/` — fallback klasyczny Fast |
+| Fast + 720p „źle wygląda” | Fast jest zablokowany do 480p; Quality 720p = bez LoRA |
+| Pipeline stoi po chunku 1 | `after()` / GET advance / durable JSON; **nie** włączaj `PIPELINE_LEGION_WORKER=1` „na zapas” |

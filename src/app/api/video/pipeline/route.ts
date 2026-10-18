@@ -21,8 +21,9 @@ export const maxDuration = 300;
 /**
  * Start pipeline (enqueue c0).
  *
- * Kolejne chunki: Legion worker (preferowane) albo Vercel `after()` best-effort.
- * Browser poll (`GET …/[id]`) NIE jest source of truth — tylko status + opcjonalny advance.
+ * Kolejne chunki: awaited Vercel `after()` kick + GET advance + durable Comfy JSON.
+ * Browser poll NIE jest jedynym źródłem — cold start wznawia z checkpointu.
+ * `PIPELINE_LEGION_WORKER` zostaw wyłączone (eksperymentalne).
  */
 export async function POST(request: Request) {
   const denied = await requireStudioApiAuth();
@@ -95,11 +96,12 @@ export async function POST(request: Request) {
     const job = pipelineToJobView(pipeline);
     const legionWorker = isPipelineLegionWorker();
 
-    // Bez Legion worker: best-effort after() (jedna pętla na start — nie na każde poll).
-    // Z Legion worker: worker woła POST …/register i orkiestruje chunki.
+    // Bez Legion worker: awaited after() — fire-and-forget void gubi pętlę na Vercel.
+    // GET …/[id] też advance’uje + durable checkpoint w Comfy input (wznawianie).
+    // Z Legion worker: worker woła POST …/register (opcjonalne; flaga niezalecana domyślnie).
     if (!legionWorker) {
-      after(() => {
-        kickPipelineBackground(pipeline.id);
+      after(async () => {
+        await kickPipelineBackground(pipeline.id);
       });
     }
 

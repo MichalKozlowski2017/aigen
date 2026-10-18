@@ -29,6 +29,7 @@ import type { GenerateBody } from "./schemas";
 import { pickChunkOutputs, type MediaRef } from "./video-outputs";
 import { runVideoPostProcess } from "./video-postprocess";
 import { stitchComfyClips } from "./video-stitch";
+import { coerceWanFast480pGeometry } from "./wan-distill";
 import {
   buildWorkflow,
   isChunkedVideoEngine,
@@ -762,6 +763,15 @@ export async function startVideoPipeline(
     kind: "video",
   });
 
+  // Fast + lightx2v: wymuś 480p zanim plan chunków / persist stanu
+  const geo = coerceWanFast480pGeometry({
+    qualityPreset: rawBody.qualityPreset,
+    wanDistillLora: rawBody.wanDistillLora,
+    width: rawBody.width,
+    height: rawBody.height,
+    model: rawBody.model,
+  });
+
   const body: GenerateBody = {
     ...rawBody,
     prompt: boost.modelPrompt,
@@ -769,6 +779,9 @@ export async function startVideoPipeline(
     startImage: ensured.startImage,
     startImageSource: undefined,
     videoEngine: engine,
+    ...(geo.locked
+      ? { width: geo.width, height: geo.height, model: geo.model }
+      : {}),
   };
 
   const videoPlan = planVideo(body);
@@ -821,6 +834,7 @@ export async function startVideoPipeline(
   await enqueueChunk(state, 0);
 
   const warnings = [...boost.warnings];
+  if (geo.warning) warnings.push(geo.warning);
   if (!state.durableSavedAt) {
     warnings.push(
       "Nie zapisano stanu pipeline w Comfy input — po redeploy Vercel odzyskanie może się nie udać. Sprawdź COMFYUI_URL / upload."
@@ -850,33 +864,36 @@ export function shouldKickPipelineBackground(
 
 /**
  * Długi tick w tle (po odpowiedzi HTTP) — kontynuuje c1/stitch gdy UI padnie.
- * Budżet czasowy: platforma (Vercel maxDuration) i tak ucięcie; poll i tak dociąga.
+ * Zwraca Promise — `after(async () => await kick…)` musi czekać na pętlę,
+ * inaczej Vercel kończy funkcję zanim fire-and-forget zdąży advance’ować.
  *
- * Legion worker jest source of truth gdy `PIPELINE_LEGION_WORKER=1` —
- * wtedy Vercel GET tylko czyta stan; kick przez POST …/register.
+ * Budżet: Vercel maxDuration i tak ucina; durable JSON w Comfy input + GET
+ * advance pozwalają klientowi / kolejnemu kickowi wznowić bez stall po c0.
+ *
+ * `PIPELINE_LEGION_WORKER=1` (opcjonalne, niezalecane domyślnie) — panel GET
+ * tylko czyta; kick przez POST …/register. Nie mylić z niezależnym
+ * `aigen-queue-worker.py` na Legionie.
  */
-export function kickPipelineBackground(
+export async function kickPipelineBackground(
   id: string,
   budgetMs = 240_000
-): void {
+): Promise<void> {
   recentBgKicks.set(id, Date.now());
-  void (async () => {
-    const deadline = Date.now() + budgetMs;
-    while (Date.now() < deadline) {
-      let state: VideoPipelineState;
-      try {
-        state = await advancePipeline(id);
-      } catch {
-        await sleep(3_000);
-        continue;
-      }
-      if (state.status === "completed" || state.status === "failed") break;
-      // Comfy liczy — rzadziej odpytuj
-      const wait =
-        state.status === "running" || state.status === "queued" ? 8_000 : 2_000;
-      await sleep(wait);
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    let state: VideoPipelineState;
+    try {
+      state = await advancePipeline(id);
+    } catch {
+      await sleep(3_000);
+      continue;
     }
-  })();
+    if (state.status === "completed" || state.status === "failed") break;
+    // Comfy liczy — rzadziej odpytuj
+    const wait =
+      state.status === "running" || state.status === "queued" ? 8_000 : 2_000;
+    await sleep(wait);
+  }
 }
 
 /** Publiczny kształt joba jak /api/jobs/[id] — UI może reuse poller. */
