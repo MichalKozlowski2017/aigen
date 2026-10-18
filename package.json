@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "smoke:wan22-chunks": "npx --yes tsx scripts/smoke-wan22-chunks.ts"
+    "smoke:wan22-chunks": "npx --yes tsx scripts/smoke-wan22-chunks.ts",
+    "smoke:comfy-errors": "npx --yes tsx scripts/smoke-comfy-errors.ts"
   },
   "dependencies": {
     "ffmpeg-static": "^5.3.0",
