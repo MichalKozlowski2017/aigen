@@ -16,6 +16,69 @@ import type { ComfyHealth } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 4_000;
 
+/** Krótki opis błędu fetch (timeout vs sieć) + host z COMFYUI_URL. */
+export function describeComfyFetchError(
+  err: unknown,
+  timeoutMs?: number
+): string {
+  let host = "";
+  try {
+    host = new URL(getComfyUrl()).host;
+  } catch {
+    host = getComfyUrl();
+  }
+  const suffix = host ? ` → ${host}` : "";
+
+  if (err instanceof Error) {
+    const name = err.name || "";
+    const msg = err.message || "";
+    if (
+      name === "AbortError" ||
+      name === "TimeoutError" ||
+      /aborted|abort/i.test(msg)
+    ) {
+      return `timeout ${timeoutMs ?? DEFAULT_TIMEOUT_MS}ms${suffix}`;
+    }
+    const cause = (err as Error & { cause?: unknown }).cause;
+    let detail = msg || "fetch failed";
+    if (cause && typeof cause === "object" && cause !== null) {
+      const c = cause as { code?: unknown; message?: unknown };
+      if (typeof c.code === "string" || typeof c.code === "number") {
+        detail = `${detail} (${String(c.code)})`;
+      } else if (typeof c.message === "string" && c.message) {
+        detail = `${detail} (${c.message})`;
+      }
+    } else if (cause instanceof Error && cause.message) {
+      detail = `${detail} (${cause.message})`;
+    }
+    return `${detail}${suffix}`;
+  }
+  return `Połączenie nieudane${suffix}`;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+/** 1–2 krótkie retry na flaky tunel (ECONNRESET / chwilowy 5xx nie tu — tylko throw). */
+export async function withComfyRetry<T>(
+  fn: () => Promise<T>,
+  options?: { attempts?: number; delayMs?: number }
+): Promise<T> {
+  const attempts = Math.max(1, options?.attempts ?? 2);
+  const delayMs = options?.delayMs ?? 350;
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      if (i < attempts - 1) await sleep(delayMs * (i + 1));
+    }
+  }
+  throw last;
+}
+
 async function fetchComfy(
   pathname: string,
   init?: RequestInit & { timeoutMs?: number }
@@ -32,6 +95,8 @@ async function fetchComfy(
       signal: controller.signal,
       cache: "no-store",
     });
+  } catch (err) {
+    throw new Error(describeComfyFetchError(err, timeoutMs));
   } finally {
     clearTimeout(timer);
   }
@@ -571,14 +636,25 @@ export async function fetchComfyViewText(
   filename: string,
   subfolder = "",
   type = "input",
-  options?: { timeoutMs?: number; minBytes?: number }
+  options?: {
+    timeoutMs?: number;
+    minBytes?: number;
+    /** true = sieć/HTTP 5xx rzuca (galeria indeks); false = null (pipeline best-effort) */
+    throwOnError?: boolean;
+  }
 ): Promise<string | null> {
+  const timeoutMs = options?.timeoutMs ?? 20_000;
   try {
     const q = new URLSearchParams({ filename, subfolder, type });
-    const res = await fetchComfy(`/view?${q.toString()}`, {
-      timeoutMs: options?.timeoutMs ?? 20_000,
-    });
-    if (!res.ok) return null;
+    const res = await fetchComfy(`/view?${q.toString()}`, { timeoutMs });
+    if (!res.ok) {
+      // 404 = brak pliku — to nie awaria sieci.
+      if (res.status === 404 || res.status === 400) return null;
+      if (options?.throwOnError) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return null;
+    }
     const ct = (res.headers.get("content-type") || "").toLowerCase();
     if (ct.includes("html")) return null;
     const text = await res.text();
@@ -593,7 +669,12 @@ export async function fetchComfyViewText(
       return null;
     }
     return text;
-  } catch {
+  } catch (err) {
+    if (options?.throwOnError) {
+      throw err instanceof Error
+        ? err
+        : new Error(describeComfyFetchError(err, timeoutMs));
+    }
     return null;
   }
 }
@@ -633,10 +714,13 @@ export async function listComfyModelFolder(
  * Odpowiedź: `["name.ext [output]", ...]`.
  */
 export async function listComfyInternalFiles(
-  directoryType: "output" | "input" | "temp"
+  directoryType: "output" | "input" | "temp",
+  options?: { timeoutMs?: number }
 ): Promise<Array<{ filename: string; type: string }>> {
+  // Krótki timeout — endpoint bywa wolny / flaky przez Quick Tunnel; indeks jest SoT.
+  const timeoutMs = options?.timeoutMs ?? 5_000;
   const res = await fetchComfy(`/internal/files/${directoryType}`, {
-    timeoutMs: 10_000,
+    timeoutMs,
   });
   if (!res.ok) {
     throw new Error(`Comfy /internal/files/${directoryType} HTTP ${res.status}`);

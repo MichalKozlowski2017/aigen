@@ -87,7 +87,8 @@ export function GalleryClient({
         </div>
         {src !== "none" ? (
           <p className="text-xs text-stone-500">
-            Źródło: {src === "comfy" ? "Comfy (historia)" : "dysk lokalny"}
+            Źródło:{" "}
+            {src === "comfy" ? "Comfy (indeks / historia)" : "dysk lokalny"}
           </p>
         ) : null}
       </div>

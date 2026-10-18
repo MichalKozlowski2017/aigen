@@ -40,7 +40,7 @@ Otwórz [http://localhost:3000](http://localhost:3000) — pulpit pokazuje stan 
 Panel możesz hostować na **Vercel**, a **ComfyUI** trzymać na stacjonarnym PC (**Legion**, RTX) — połączenie przez **Cloudflare Tunnel** (HTTPS do `127.0.0.1:8188`, bez otwierania portu w routerze).
 
 1. Na Legionie: ComfyUI na `127.0.0.1:8188` + tunel `cloudflared` wskazujący na ten adres.
-2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`. **Nie** ustawiaj `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` na Vercel — panel czyta modele (`/models/…`) i galerię (historia + indeks `aigen-gallery-index.json`) przez tunel.
+2. W Vercel: Import repozytorium `MichalKozlowski2017/aigen`, ustaw `COMFYUI_URL` (publiczny URL tunelu) i `STUDIO_PASSWORD`. **Nie** ustawiaj `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` na Vercel — panel czyta modele (`/models/…`) i galerię (indeks `aigen-gallery-index.json` + historia) przez tunel. Na Legionie: `scripts/legion/start-comfy-stack.ps1` (Comfy + tunnel + worker); Quick Tunnel URL → `logs/cloudflared-tunnel-url.txt`.
 3. Deploy — zdalny dostęp do panelu; generacja działa, gdy Legion, tunel i ComfyUI są online.
 
 Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).

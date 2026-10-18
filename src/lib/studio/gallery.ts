@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { getHistory, listComfyInternalFiles } from "./comfy-client";
+import {
+  getHistory,
+  listComfyInternalFiles,
+  withComfyRetry,
+} from "./comfy-client";
 import { loadGalleryIndex } from "./gallery-index";
 import { normalizeComfyMediaRef } from "./comfy-media";
 import { outputRoot, resolveOutputFile } from "./paths";
@@ -128,10 +132,12 @@ function pushGalleryRef(
 }
 
 /**
- * Galeria zdalna (COMFYUI_URL / tunel):
- * 1) `/history` (świeże joby),
- * 2) `input/aigen-gallery-index.json` (trwałe po wipe historii),
- * 3) `/internal/files/output` (stock — tylko root output, bez studio/).
+ * Galeria zdalna (COMFYUI_URL / tunel) — **index-first**:
+ * 1) `input/aigen-gallery-index.json` (trwałe po wipe `/history` / reboocie),
+ * 2) `/history` (świeże joby; bywa duże i wolne przez tunel),
+ * 3) `/internal/files/output` (stock root; tylko gdy indeks pusty / mało wpisów).
+ *
+ * Gdy indeks da listę, UI działa nawet jeśli historia + internal/files padną.
  */
 export async function listGalleryFromComfy(options: {
   kind?: "all" | "image" | "video";
@@ -142,26 +148,15 @@ export async function listGalleryFromComfy(options: {
   const seen = new Set<string>();
   const refs: ComfyGalleryRef[] = [];
   const errors: string[] = [];
+  let indexCount = 0;
 
+  // 1) Indeks — mały JSON, najstabilniejszy przez Quick Tunnel.
   try {
-    const history = (await getHistory()) as Record<string, unknown>;
-    for (const [promptId, entry] of Object.entries(history)) {
-      const outs = extractOutputsFromHistoryEntry(entry);
-      for (const o of outs) {
-        pushGalleryRef(refs, seen, o.filename, o.subfolder, o.type);
-      }
-      void promptId;
-    }
-  } catch (err) {
-    errors.push(
-      err instanceof Error
-        ? `historia: ${err.message}`
-        : "historia: odczyt nieudany"
-    );
-  }
-
-  try {
-    const indexed = await loadGalleryIndex();
+    const indexed = await withComfyRetry(() => loadGalleryIndex(), {
+      attempts: 2,
+      delayMs: 400,
+    });
+    indexCount = indexed.length;
     for (const o of indexed) {
       pushGalleryRef(
         refs,
@@ -180,26 +175,60 @@ export async function listGalleryFromComfy(options: {
     );
   }
 
-  try {
-    const internal = await listComfyInternalFiles("output");
-    let order = 0;
-    for (const f of internal) {
-      order += 1;
-      pushGalleryRef(
-        refs,
-        seen,
-        f.filename,
-        "",
-        f.type || "output",
-        Date.now() - order
-      );
-    }
-  } catch (err) {
-    errors.push(
-      err instanceof Error
-        ? `internal/files: ${err.message}`
-        : "internal/files: odczyt nieudany"
-    );
+  // 2–3) Historia + /internal/files tylko gdy indeks pusty/skąpy.
+  // Przy zdrowym indeksie pomijamy flaky endpointy (Quick Tunnel timeouty).
+  const needLiveSources = indexCount < Math.min(limit, 8);
+
+  if (needLiveSources) {
+    await Promise.all([
+      (async () => {
+        try {
+          const history = (await withComfyRetry(() => getHistory(), {
+            attempts: 2,
+            delayMs: 400,
+          })) as Record<string, unknown>;
+          for (const [promptId, entry] of Object.entries(history)) {
+            const outs = extractOutputsFromHistoryEntry(entry);
+            for (const o of outs) {
+              pushGalleryRef(refs, seen, o.filename, o.subfolder, o.type);
+            }
+            void promptId;
+          }
+        } catch (err) {
+          errors.push(
+            err instanceof Error
+              ? `historia: ${err.message}`
+              : "historia: odczyt nieudany"
+          );
+        }
+      })(),
+      (async () => {
+        try {
+          const internal = await withComfyRetry(
+            () => listComfyInternalFiles("output", { timeoutMs: 5_000 }),
+            { attempts: 2, delayMs: 300 }
+          );
+          let order = 0;
+          for (const f of internal) {
+            order += 1;
+            pushGalleryRef(
+              refs,
+              seen,
+              f.filename,
+              "",
+              f.type || "output",
+              Date.now() - order
+            );
+          }
+        } catch (err) {
+          errors.push(
+            err instanceof Error
+              ? `internal/files: ${err.message}`
+              : "internal/files: odczyt nieudany"
+          );
+        }
+      })(),
+    ]);
   }
 
   const items: GalleryItem[] = [];
@@ -230,15 +259,24 @@ export async function listGalleryFromComfy(options: {
   }
 
   items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const sliced = items.slice(0, limit);
 
-  if (items.length === 0 && errors.length > 0) {
+  if (sliced.length === 0 && errors.length > 0) {
     return {
       items: [],
       error: `Galeria Comfy: ${errors.join("; ")}`,
     };
   }
 
-  return { items: items.slice(0, limit), error: null };
+  // Mamy pozycje z indeksu — nie blokuj UI twardym błędem historii/internal.
+  if (sliced.length > 0 && errors.length > 0 && indexCount === 0) {
+    return {
+      items: sliced,
+      error: `Galeria częściowa (bez indeksu): ${errors.join("; ")}`,
+    };
+  }
+
+  return { items: sliced, error: null };
 }
 
 async function listGalleryFromDisk(options: {
