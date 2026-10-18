@@ -28,6 +28,7 @@ python main.py --listen 127.0.0.1 --port 8188
 - Checkpoint **SVD XT** (`svd_xt.safetensors`) w `models/checkpoints`
 - Custom node **Video Helper Suite** (VHS) — node `VHS_VideoCombine`
 - Obraz startowy: upload z panelu **Wideo** (nad promptem → `/api/upload` → Comfy `input`) albo ręcznie plik do `ComfyUI/input`
+- **iPhone:** panel client-side normalizuje JPEG/PNG (bake EXIF Orientation + cap ~2048px) przed uploadem. HEIC — próba dekodowania w Safari; przy błędzie zapisz jako JPEG w Photos. **ProRAW/DNG** nie są obsługiwane — w Photos: Udostępnij → Zapisz jako JPEG (albo wyłącz Apple ProRAW).
 
 ## 2. Zmienne ENV panelu
 

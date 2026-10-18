@@ -59,15 +59,55 @@ export async function POST(request: Request) {
   const type = (file.type || "").toLowerCase();
   const nameLower = file.name.toLowerCase();
   const extOk = /\.(png|jpe?g|webp|gif)$/i.test(nameLower);
+  const isDng =
+    /\.dng$/i.test(nameLower) ||
+    type === "image/dng" ||
+    type === "image/x-adobe-dng" ||
+    type.includes("dng");
+  const isHeic =
+    /\.(heic|heif)$/i.test(nameLower) ||
+    type === "image/heic" ||
+    type === "image/heif" ||
+    type.includes("heic") ||
+    type.includes("heif");
+
+  if (isDng) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "ProRAW / DNG nie jest obsługiwany. W Photos: zapisz jako JPEG, potem wgraj ponownie.",
+      },
+      { status: 400 }
+    );
+  }
+  if (isHeic) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "HEIC/HEIF: zapisz jako JPEG w Photos na iPhonie, potem wgraj ponownie.",
+      },
+      { status: 400 }
+    );
+  }
   if (type && !ALLOWED_TYPES.has(type) && !extOk) {
     return NextResponse.json(
-      { ok: false, error: "Dozwolone: PNG, JPEG, WebP, GIF" },
+      {
+        ok: false,
+        error:
+          "Dozwolone: PNG, JPEG, WebP, GIF. Z iPhone’a: zapisz jako JPEG w Photos (nie HEIC/ProRAW).",
+      },
       { status: 400 }
     );
   }
   if (!type && !extOk) {
     return NextResponse.json(
-      { ok: false, error: "Dozwolone: PNG, JPEG, WebP, GIF" },
+      {
+        ok: false,
+        error:
+          "Dozwolone: PNG, JPEG, WebP, GIF. Z iPhone’a: zapisz jako JPEG w Photos (nie HEIC/ProRAW).",
+      },
       { status: 400 }
     );
   }
