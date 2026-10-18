@@ -140,7 +140,7 @@ Opcjonalnie fused distill (bez LoRA): `wan2.2_i2v_A14b_{high,low}_noise_scaled_f
 
 HF: [Comfy-Org/Wan_2.2_ComfyUI_Repackaged](https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged), [lightx2v/Wan2.2-Distill-Models](https://huggingface.co/lightx2v/Wan2.2-Distill-Models). VAE/CLIP: te same co 2.1 (`wan_2.1_vae`, `umt5_xxl_fp8`, `clip_vision_h`).
 
-**Fast default = Wan 2.1** (+ lightx2v). Wan 2.2 MoE jest opt-in (`WAN22_MOE_ENABLE=1`) — na RTX 5080 (sm_120) MoE pada `cudaErrorNoKernelImageForDevice` na low `KSamplerAdvanced`.
+**Fast default = Wan 2.1** (+ lightx2v), **bez** `PathchSageAttentionKJ`. Opt-in: `WAN22_MOE_ENABLE=1`, `WAN_SAGE_ENABLE=1`. Na RTX 5080 (sm_120) Sage/MoE+Sage padają `cudaErrorNoKernelImageForDevice`; Wan 2.1 bez Sage = OK.
 
 ### Comfy na Legionie (`--fast` + Sage via KJNodes)
 

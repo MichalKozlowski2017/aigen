@@ -4,6 +4,7 @@
  *
  *   npx --yes tsx scripts/smoke-wan21-fast.ts
  */
+import { isWanSageEnabled } from "../src/lib/studio/wan-sage";
 import {
   isWan22FastMoeEnabled,
   WAN22_MOE_UNSTABLE_NOTE,
@@ -32,13 +33,18 @@ function assertWan21FastGraph(graph: Graph, label: string): void {
   assert(graph["37"]?.class_type === "UNETLoader", `${label}: single high UNET`);
   assert(!graph["57"], `${label}: must NOT have MoE low UNET 57`);
   assert(!graph["61"], `${label}: must NOT have MoE low sampler 61`);
+  const samplerType = graph["3"]?.class_type;
   assert(
-    graph["3"]?.class_type === "KSampler",
-    `${label}: sampler must be KSampler (got ${graph["3"]?.class_type})`
+    samplerType === "KSampler",
+    `${label}: sampler must be KSampler (got ${samplerType})`
   );
   assert(
-    graph["3"]?.class_type !== "KSamplerAdvanced",
+    !Object.values(graph).some((n) => n.class_type === "KSamplerAdvanced"),
     `${label}: no KSamplerAdvanced on 2.1 Fast`
+  );
+  assert(
+    !Object.values(graph).some((n) => n.class_type === "PathchSageAttentionKJ"),
+    `${label}: no PathchSageAttentionKJ by default`
   );
   assert(graph["38"]?.class_type === "CLIPLoader", `${label}: CLIPLoader`);
   assert(graph["49"]?.class_type === "CLIPVisionLoader", `${label}: CLIPVision`);
@@ -53,7 +59,9 @@ function assertWan21FastGraph(graph: Graph, label: string): void {
 }
 
 delete process.env.WAN22_MOE_ENABLE;
+delete process.env.WAN_SAGE_ENABLE;
 assert(isWan22FastMoeEnabled() === false, "default MoE off");
+assert(isWanSageEnabled() === false, "default Sage off");
 assert(/RTX 5080/i.test(WAN22_MOE_UNSTABLE_NOTE), "UI note mentions RTX 5080");
 
 const g21 = cloneTemplate();
@@ -81,14 +89,22 @@ applyWan22FastMoeGraph(gMoe, {
 assert(gMoe["61"]?.class_type === "KSamplerAdvanced", "moe contrast: has 61");
 assert(gMoe["57"]?.class_type === "UNETLoader", "moe contrast: has 57");
 
+// MoE with sage=false must not insert PathchSageAttentionKJ
+assert(
+  !Object.values(gMoe).some((n) => n.class_type === "PathchSageAttentionKJ"),
+  "moe sage=false: no Sage nodes"
+);
+
 console.log(
   JSON.stringify({
     ok: true,
     defaultMoeEnabled: false,
+    defaultSageEnabled: false,
     wan21: {
       sampler: g21["3"].class_type,
       unets: ["37"],
       hasMoE: false,
+      hasSage: false,
     },
     note: WAN22_MOE_UNSTABLE_NOTE.slice(0, 80),
   })
