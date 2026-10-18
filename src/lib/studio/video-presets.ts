@@ -60,7 +60,7 @@ export const WAN_QUALITY_PRESETS: WanQualityPreset[] = [
   {
     id: "fast-480p",
     label: "Fast 480p",
-    blurb: "domyślny · distill LoRA · 832×480 · 16 fps · steps 4–8 · CFG 1 · euler",
+    blurb: "domyślny · distill LoRA · 832×480 / 480×832 · 16 fps · steps 4–8 · CFG 1 · euler",
     width: WAN_UI_LIMITS.defaultWidth,
     height: WAN_UI_LIMITS.defaultHeight,
     fps: 16,

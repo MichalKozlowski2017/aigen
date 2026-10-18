@@ -30,7 +30,7 @@ function authorize(request: Request): NextResponse | null {
       {
         ok: false,
         error:
-          "Brak COMFY_URL_UPDATE_SECRET (lub REVALIDATE_SECRET) na Vercel — ustaw sekret przed auto-publish.",
+          "Brak COMFY_URL_UPDATE_SECRET na Vercel — ustaw dedykowany sekret (REVALIDATE_SECRET nie wystarczy).",
       },
       { status: 503 }
     );
@@ -65,8 +65,9 @@ export async function GET(request: Request) {
 
 /**
  * Legion → Vercel: opublikuj nowy Quick Tunnel URL bez redeploy / Settings UI.
- * Auth: Authorization: Bearer <COMFY_URL_UPDATE_SECRET|REVALIDATE_SECRET>
+ * Auth: Authorization: Bearer <COMFY_URL_UPDATE_SECRET> (dedykowany; nie REVALIDATE_SECRET)
  * Body: { "url": "https://….trycloudflare.com" }
+ * Hosty: *.trycloudflare.com + opcjonalnie COMFY_URL_ALLOW_HOSTS.
  */
 export async function POST(request: Request) {
   const denied = authorize(request);

@@ -640,10 +640,12 @@ async function finishStitch(
         state.engine === "wan"
           ? "studio/video-wan-stitched"
           : "studio/video-ltx-stitched";
+      // Overlap drop w Comfy (ImageFromBatch index 1 dla chunk>0) —
+      // stitch bez ffmpeg trim, żeby -c copy mógł działać.
       const result = await stitchComfyClips({
         clips: state.clips,
         fps: state.plan.fps,
-        overlapFrames: state.plan.overlap,
+        overlapFrames: 0,
         filenamePrefix: stitchPrefix,
       });
       finalClip = {
