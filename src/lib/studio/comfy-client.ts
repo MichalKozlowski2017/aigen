@@ -136,6 +136,36 @@ export async function checkComfyHealth(): Promise<ComfyHealth> {
   }
 }
 
+/**
+ * Soft unload wag z VRAM/RAM Comfy (POST /free) — bez restartu procesu.
+ * Domyślnie unload_models + free_memory (jak przycisk „Zwolnij modele”).
+ */
+export async function freeComfyMemory(options?: {
+  unloadModels?: boolean;
+  freeMemory?: boolean;
+}): Promise<{ ok: true }> {
+  const unloadModels = options?.unloadModels !== false;
+  const freeMemory = options?.freeMemory !== false;
+  const res = await fetchComfy("/free", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      unload_models: unloadModels,
+      free_memory: freeMemory,
+    }),
+    timeoutMs: 30_000,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      text
+        ? `Comfy /free HTTP ${res.status}: ${text.slice(0, 200)}`
+        : `Comfy /free HTTP ${res.status}`
+    );
+  }
+  return { ok: true };
+}
+
 export async function enqueuePrompt(
   workflow: Record<string, unknown>,
   clientId = "aigen"

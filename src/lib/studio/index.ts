@@ -69,4 +69,12 @@ export {
   type VideoOrientationMode,
   type VideoOrientationResolved,
 } from "./video-orientation";
+export {
+  LAST_ENGINE_FAMILY_KEY,
+  parseEngineFamily,
+  readLastEngineFamily,
+  shouldFreeBeforeJob,
+  writeLastEngineFamily,
+  type EngineFamily,
+} from "./last-engine";
 export { runVideoPostProcess } from "./video-postprocess";

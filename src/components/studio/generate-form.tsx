@@ -14,6 +14,10 @@ import {
   isFluxModel,
   type ImageModelOption,
 } from "@/lib/studio/flux";
+import {
+  shouldFreeBeforeJob,
+  writeLastEngineFamily,
+} from "@/lib/studio/last-engine";
 import type { GalleryItem } from "@/lib/studio/types";
 import {
   DEFAULT_VIDEO_ENGINE,
@@ -268,6 +272,8 @@ export function GenerateForm({
   const [galleryBusy, setGalleryBusy] = useState(false);
   const [galleryError, setGalleryError] = useState<string | null>(null);
   const [pollWarning, setPollWarning] = useState<string | null>(null);
+  /** Krótka notka gdy auto /free przy zmianie Obraz↔Wideo. */
+  const [engineFreeNote, setEngineFreeNote] = useState<string | null>(null);
 
   const wsEnabled = Boolean(
     promptId &&
@@ -930,11 +936,47 @@ export function GenerateForm({
     setPollWarning(null);
   }
 
+  async function maybeFreeOnEngineSwitch(): Promise<void> {
+    if (!shouldFreeBeforeJob(kind)) return;
+    setEngineFreeNote(
+      kind === "image"
+        ? "Zwalniam modele wideo przed obrazem…"
+        : "Zwalniam modele obrazu przed wideo…"
+    );
+    try {
+      const res = await fetch("/api/comfy/free", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ unload_models: true, free_memory: true }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setEngineFreeNote(
+          data.error
+            ? `Auto-zwolnienie nieudane (${data.error}) — kontynuuję job.`
+            : "Auto-zwolnienie nieudane — kontynuuję job."
+        );
+        return;
+      }
+      setEngineFreeNote(
+        kind === "image"
+          ? "Modele wideo zwolnione — startuję obraz."
+          : "Modele obrazu zwolnione — startuję wideo."
+      );
+    } catch {
+      setEngineFreeNote("Auto-zwolnienie nieudane (sieć) — kontynuuję job.");
+    }
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setErrorDetail(null);
     setPollWarning(null);
+    setEngineFreeNote(null);
     setOutputs([]);
     setJobProgress(null);
     setNodesTotalHint(null);
@@ -953,6 +995,8 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
+        await maybeFreeOnEngineSwitch();
+
         const wanSized =
           kind === "video" && videoEngine === "wan"
             ? applyWanOrientationSize({
@@ -1096,6 +1140,7 @@ export function GenerateForm({
             setPromptId(data.promptId);
           }
           setStatus("queued");
+          writeLastEngineFamily(kind);
           return;
         }
 
@@ -1152,6 +1197,7 @@ export function GenerateForm({
           setNodesTotalHint(data.nodesTotal);
         }
         setPromptId(data.promptId);
+        writeLastEngineFamily(kind);
         setJobProgress({
           percent: 5,
           stage: "queued",
@@ -2003,6 +2049,15 @@ export function GenerateForm({
         {pollWarning && !error ? (
           <p className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-3 py-2 text-sm text-amber-100/90">
             {pollWarning}
+          </p>
+        ) : null}
+
+        {engineFreeNote && !error ? (
+          <p
+            className="rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-2 text-sm text-teal-100/85"
+            role="status"
+          >
+            {engineFreeNote}
           </p>
         ) : null}
 
