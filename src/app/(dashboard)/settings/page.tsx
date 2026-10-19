@@ -1,3 +1,4 @@
+import { FreeModelsButton } from "@/components/studio/free-models-button";
 import { getStudioPublicConfigAsync } from "@/lib/studio/config";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,8 @@ export default async function StudioSettingsPage() {
           </p>
         ) : null}
       </header>
+
+      <FreeModelsButton variant="panel" />
 
       <dl className="divide-y divide-studio-border border-y border-studio-border">
         {rows.map((row) => (

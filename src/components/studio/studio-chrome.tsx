@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getStudioPublicConfigAsync } from "@/lib/studio/config";
+import { FreeModelsButton } from "./free-models-button";
 import { StudioBackdrop } from "./studio-backdrop";
 import { StudioNav } from "./studio-nav";
 import { ThemeToggle } from "./theme-toggle";
@@ -36,8 +37,11 @@ export async function StudioChrome({ children }: { children: React.ReactNode }) 
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between lg:justify-end lg:gap-4">
             <StudioNav />
-            <div className="hidden shrink-0 lg:block">
-              <ThemeToggle />
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <FreeModelsButton variant="compact" />
+              <div className="hidden lg:block">
+                <ThemeToggle />
+              </div>
             </div>
           </div>
         </div>

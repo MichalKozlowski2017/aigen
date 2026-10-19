@@ -117,9 +117,9 @@ Nie commituj plików `.safetensors` / `.ckpt`.
 
 Na ~16 GB VRAM zwykle **szybciej i stabilniej**: preset **Fast + upscale/smooth** (RealESRGAN×2 + RIFE 16→24) niż native Quality 720p. Quality 720p zostaw gdy potrzebujesz natywnej ostrości bez upscale.
 
-### RAM: nie przełączaj Flux ↔ Wan w serii
+### RAM: soft unload przy zmianie Flux ↔ Wan
 
-Flux + Wan łącznie ~**73 GB** wag vs ~**64 GB** RAM Legion — przełączanie Obraz↔Wideo = thrash. Odpalaj wideo w serii (albo restart Comfy przed zmianą silnika). Tip w UI na obu stronach.
+Flux + Wan łącznie ~**73 GB** wag vs ~**64 GB** RAM Legion. Panel woła Comfy `POST /free` (`unload_models` + `free_memory`) przy zmianie Obraz↔Wideo oraz z przycisku **Zwolnij modele** (nagłówek / Ustawienia) — soft unload, bez restartu procesu. Seria samych obrazów albo samych wideo — bez unloadu.
 
 ### Wan 2.2 Fast MoE (preferowane gdy pliki na Legionie)
 
