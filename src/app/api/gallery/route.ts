@@ -13,6 +13,8 @@ export async function GET(request: Request) {
   const parsed = galleryQuerySchema.safeParse({
     kind: url.searchParams.get("kind") ?? undefined,
     limit: url.searchParams.get("limit") ?? undefined,
+    offset: url.searchParams.get("offset") ?? undefined,
+    refresh: url.searchParams.get("refresh") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json(
@@ -22,5 +24,13 @@ export async function GET(request: Request) {
   }
 
   const result = await listGallery(parsed.data);
-  return NextResponse.json({ ok: true, ...result });
+  const headers = new Headers();
+  // Krótki private cache — Obrazy/Wideo filtrują po stronie klienta;
+  // refresh=1 omija cache indeksu po stronie serwera.
+  if (!parsed.data.refresh) {
+    headers.set("Cache-Control", "private, max-age=15");
+  } else {
+    headers.set("Cache-Control", "no-store");
+  }
+  return NextResponse.json({ ok: true, ...result }, { headers });
 }

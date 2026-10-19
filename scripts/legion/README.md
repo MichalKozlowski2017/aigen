@@ -61,7 +61,17 @@ Po Named nie musisz klepać Settings po reboocie Legionu.
 
 `/history` Comfy jest puste po restarcie. Trwały indeks:
 
-- plik Comfy: `input/aigen-gallery-index.json` (AIGen dopisuje po jobach)
-- seed istniejących plików: `python scripts/seed-comfy-gallery-index.py --comfy-url http://127.0.0.1:8188`
+- plik Comfy: `input/aigen-gallery-index.json`
+- **Panel** dopisuje po jobach obrazów (`/api/jobs`) i po `finishStitch` na Vercel
+- **Queue worker** (Legion) **nie** dopisywał indeksu — `start-queue-worker.ps1` odpala też
+  `aigen-gallery-index-watcher.py`, który przy `status=completed` dopisuje outputs lokalnie
+- Pełny re-scan dysku: `python scripts/seed-comfy-gallery-index.py --comfy-url http://127.0.0.1:8188`
 
-Panel (Vercel) czyta **najpierw indeks**, potem opcjonalnie historię / `/internal/files`.
+Panel (Vercel) czyta **najpierw indeks** (krótki cache), potem opcjonalnie historię / `/internal/files` tylko gdy indeks pusty/skąpy.
+
+### Odśwież indeks (ops)
+
+1. W UI Galeria → **Odśwież indeks** (cache bust + ponowny odczyt `/view`)
+2. Pełny skan `output/` (gdy brakuje starych plików): seed na Legionie jak wyżej
+3. Opcjonalny in-process patch workera: `python scripts/legion/patch-queue-worker-gallery.py --comfy-root …`
+   (preferuj watcher — nie wymaga edycji workera)

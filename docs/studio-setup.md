@@ -61,7 +61,7 @@ STUDIO_PASSWORD=...
 ```
 
 - **Modele:** status „gotowy/brak” z `GET {COMFYUI_URL}/models/{folder}` (nie z dysku Vercel).
-- **Galeria (index-first):** najpierw trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe `/history` po reboocie), potem opcjonalnie `/history` + stock `/internal/files/output` (tylko gdy indeks pusty/skąpy; `/internal/files` nie rekuruje `studio/`). Proxy plików: `/api/comfy-view`. Po restarcie z pustą historią: `python scripts/seed-comfy-gallery-index.py` na Legionie (skan `output/`, upload indeksu — bez restartu Comfy).
+- **Galeria (index-first):** najpierw trwały indeks `input/aigen-gallery-index.json` (przeżywa wipe `/history` po reboocie; krótki cache ~15 s), potem opcjonalnie `/history` + stock `/internal/files/output` (tylko gdy indeks pusty/skąpy; `/internal/files` nie rekuruje `studio/`). Proxy plików: `/api/comfy-view`. Filtry Obrazy/Wideo są lokalne (bez ponownego fetch). **Odśwież indeks** w UI = cache bust + `/view`. Pełny skan dysku: `python scripts/seed-comfy-gallery-index.py` na Legionie. Queue worker dopisuje indeks przez `scripts/legion/aigen-gallery-index-watcher.py` (start z `start-queue-worker.ps1`).
 - **Autostart Legion:** `scripts/legion/start-comfy-stack.ps1` (Comfy + Quick Tunnel + queue worker). Bez domeny: `AIGEN_PANEL_URL` + `COMFY_URL_UPDATE_SECRET` → auto `publish-comfy-url.ps1`. Opcjonalnie `install-startup-shortcut.ps1`. Szczegóły: `scripts/legion/README.md`.
 - **Named Tunnel / Quick auto-sync:** [docs/named-cloudflare-tunnel.md](named-cloudflare-tunnel.md).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).

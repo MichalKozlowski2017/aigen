@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { checkComfyHealth } from "@/lib/studio/comfy-client";
+import { recordGalleryOutputs } from "@/lib/studio/gallery-index";
 import { stitchBodySchema } from "@/lib/studio/schemas";
 import { stitchComfyClips } from "@/lib/studio/video-stitch";
 
@@ -41,6 +42,13 @@ export async function POST(request: Request) {
       subfolder: result.subfolder,
       type: result.type,
     }).toString()}`;
+    await recordGalleryOutputs([
+      {
+        filename: result.filename,
+        subfolder: result.subfolder,
+        type: result.type || "output",
+      },
+    ]);
     return NextResponse.json({
       ok: true,
       ...result,

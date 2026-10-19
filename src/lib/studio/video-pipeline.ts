@@ -711,13 +711,22 @@ async function finishStitch(
     });
     state.advancingUntil = undefined;
     await persist(state);
-    void recordGalleryOutputs(
-      state.outputs.map((o) => ({
-        filename: o.filename,
-        subfolder: o.subfolder,
-        type: o.type || "output",
-      }))
-    );
+    // Await z timeout — void gubił błędy; Legion worker i tak dopisuje
+    // lokalnie przez aigen-gallery-index-watcher.py.
+    try {
+      await Promise.race([
+        recordGalleryOutputs(
+          state.outputs.map((o) => ({
+            filename: o.filename,
+            subfolder: o.subfolder,
+            type: o.type || "output",
+          }))
+        ),
+        new Promise((resolve) => setTimeout(resolve, 10_000)),
+      ]);
+    } catch {
+      // best-effort
+    }
   } catch (err) {
     state.status = "failed";
     state.error = err instanceof Error ? err.message : "Stitch nieudany";

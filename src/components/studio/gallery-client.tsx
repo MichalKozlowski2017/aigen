@@ -1,43 +1,106 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GalleryItem } from "@/lib/studio/types";
+
+function LazyVideoThumb({ item }: { item: GalleryItem }) {
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [active, setActive] = useState(
+    () => typeof IntersectionObserver === "undefined"
+  );
+
+  useEffect(() => {
+    if (active) return;
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) {
+            setActive(true);
+            io.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: "120px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [active]);
+
+  return (
+    <video
+      ref={ref}
+      key={item.url}
+      src={active ? item.url : undefined}
+      controls={active}
+      playsInline
+      preload="none"
+      className="aspect-video w-full bg-studio-media"
+    >
+      {active ? <a href={item.url}>Otwórz wideo</a> : null}
+    </video>
+  );
+}
 
 export function GalleryClient({
   initialItems,
   configured,
   message,
   source = "none",
+  initialTotal,
 }: {
   initialItems: GalleryItem[];
   configured: boolean;
   message: string | null;
   source?: "local" | "comfy" | "none";
+  initialTotal?: number;
 }) {
   const [kind, setKind] = useState<"all" | "image" | "video">("all");
-  const [items, setItems] = useState(initialItems);
+  const [allItems, setAllItems] = useState(initialItems);
   const [error, setError] = useState<string | null>(message);
   const [src, setSrc] = useState(source);
+  const [total, setTotal] = useState(initialTotal ?? initialItems.length);
   const [downloadBusy, setDownloadBusy] = useState<string | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const res = await fetch(`/api/gallery?kind=${kind}&limit=80`);
+  // Filtr Obrazy/Wideo — tylko lokalnie, bez refetch API.
+  const items = useMemo(() => {
+    if (kind === "all") return allItems;
+    return allItems.filter((i) => i.kind === kind);
+  }, [allItems, kind]);
+
+  const refreshIndex = useCallback(async () => {
+    setRefreshBusy(true);
+    setError(null);
+    setHint(null);
+    try {
+      const res = await fetch("/api/gallery/refresh", { method: "POST" });
       const data = await res.json();
-      if (cancelled) return;
       if (!data.ok) {
-        setError(data.error ?? "Błąd galerii");
+        setError(data.error ?? "Odświeżanie indeksu nieudane");
         return;
       }
-      setItems(data.items ?? []);
-      setError(data.error);
+      setAllItems(data.items ?? []);
+      setTotal(
+        typeof data.total === "number" ? data.total : (data.items?.length ?? 0)
+      );
+      setError(data.error ?? null);
       setSrc(data.source ?? "none");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [kind]);
+      setHint(
+        data.hint ??
+          "Indeks przeładowany. Pełny skan dysku: seed-comfy-gallery-index.py na Legionie."
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Odświeżanie indeksu nieudane"
+      );
+    } finally {
+      setRefreshBusy(false);
+    }
+  }, []);
 
   async function downloadItem(item: GalleryItem) {
     setDownloadBusy(item.id);
@@ -85,12 +148,24 @@ export function GalleryClient({
             </button>
           ))}
         </div>
-        {src !== "none" ? (
-          <p className="text-xs text-stone-500">
-            Źródło:{" "}
-            {src === "comfy" ? "Comfy (indeks / historia)" : "dysk lokalny"}
-          </p>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void refreshIndex()}
+            disabled={refreshBusy}
+            className="inline-flex min-h-11 items-center rounded-md border border-studio-border px-3 py-2 text-sm font-medium text-stone-300 transition hover:border-teal-400/40 hover:text-teal-100 disabled:opacity-50"
+            title="Ponowny odczyt aigen-gallery-index.json (bez pełnego skanu dysku)"
+          >
+            {refreshBusy ? "Odświeżam…" : "Odśwież indeks"}
+          </button>
+          {src !== "none" ? (
+            <p className="text-xs text-stone-500">
+              Źródło:{" "}
+              {src === "comfy" ? "Comfy (indeks)" : "dysk lokalny"}
+              {total > 0 ? ` · ${items.length}/${total}` : null}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {!configured || error ? (
@@ -99,10 +174,13 @@ export function GalleryClient({
         </p>
       ) : null}
 
+      {hint ? <p className="text-xs text-stone-500">{hint}</p> : null}
+
       {items.length === 0 && configured && !error ? (
         <p className="text-sm text-stone-500">
           Brak plików — wygeneruj obraz na zakładce Generuj (trafia do output /
-          historii Comfy).
+          indeksu Comfy). Jeśli brakuje nowych wideo: Odśwież indeks albo seed na
+          Legionie.
         </p>
       ) : null}
 
@@ -118,21 +196,14 @@ export function GalleryClient({
               className="studio-fade-in overflow-hidden rounded-xl border border-studio-border bg-studio-surface"
             >
               {item.kind === "video" ? (
-                <video
-                  key={item.url}
-                  src={item.url}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="aspect-video w-full bg-studio-media"
-                >
-                  <a href={item.url}>Otwórz wideo</a>
-                </video>
+                <LazyVideoThumb item={item} />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={item.url}
                   alt={item.name}
+                  loading="lazy"
+                  decoding="async"
                   className="aspect-square w-full object-cover"
                 />
               )}

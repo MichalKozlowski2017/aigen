@@ -4,7 +4,7 @@ import { listGallery } from "@/lib/studio/gallery";
 export const dynamic = "force-dynamic";
 
 export default async function StudioGalleryPage() {
-  const result = await listGallery({ kind: "all", limit: 60 });
+  const result = await listGallery({ kind: "all", limit: 80 });
 
   return (
     <div className="space-y-8">
@@ -20,10 +20,10 @@ export default async function StudioGalleryPage() {
         </h1>
         <p className="max-w-2xl text-stone-400">
           {result.source === "comfy"
-            ? "Outputy przez COMFYUI_URL / tunel: historia Comfy, indeks aigen-gallery-index.json oraz /internal/files/output."
+            ? "Index-first: aigen-gallery-index.json przez tunel (historia / internal/files tylko gdy indeks pusty)."
             : result.source === "local"
               ? "Pliki z COMFYUI_OUTPUT_DIR — obrazy i MP4."
-              : "Lokalny katalog output albo Comfy przez tunel (historia / indeks)."}
+              : "Lokalny katalog output albo Comfy przez tunel (indeks)."}
         </p>
       </header>
       <GalleryClient
@@ -31,6 +31,7 @@ export default async function StudioGalleryPage() {
         configured={result.configured}
         message={result.error}
         source={result.source}
+        initialTotal={result.total}
       />
     </div>
   );

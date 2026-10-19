@@ -21,7 +21,26 @@ export async function GET(
     const job = await getJobStatus(id);
     // Po wipe `/history` galeria czyta indeks w Comfy input — dopisz outputy joba.
     if (job.status === "completed" && job.outputs.length > 0) {
-      void recordGalleryOutputs(job.outputs);
+      // Await z krótkim budżetem — void gubił błędy przy zdrowym indeksie
+      // (gallery index-first pomija /history → nowe PNG/MP4 niewidoczne).
+      try {
+        await Promise.race([
+          recordGalleryOutputs(job.outputs),
+          new Promise<{ ok: false; count: number; error: string }>((resolve) =>
+            setTimeout(
+              () =>
+                resolve({
+                  ok: false,
+                  count: 0,
+                  error: "gallery index timeout",
+                }),
+              8_000
+            )
+          ),
+        ]);
+      } catch {
+        // best-effort
+      }
     }
     return NextResponse.json({ ok: true, job });
   } catch (err) {
