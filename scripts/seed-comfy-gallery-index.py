@@ -23,6 +23,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+# Wspólna lib (append) — opcjonalna; seed ma własne walk/upload.
+_SCRIPTS = Path(__file__).resolve().parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
 VIDEO_EXT = {".mp4", ".webm", ".mov", ".mkv"}
 MEDIA_EXT = IMAGE_EXT | VIDEO_EXT

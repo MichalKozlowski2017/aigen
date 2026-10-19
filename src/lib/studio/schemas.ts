@@ -98,5 +98,11 @@ export const downloadBodySchema = z.object({
 
 export const galleryQuerySchema = z.object({
   kind: z.enum(["all", "image", "video"]).optional().default("all"),
-  limit: z.coerce.number().int().min(1).max(200).optional().default(60),
+  limit: z.coerce.number().int().min(1).max(120).optional().default(60),
+  offset: z.coerce.number().int().min(0).max(500).optional().default(0),
+  /** Cache bust + ponowny odczyt indeksu (przycisk Odśwież). */
+  refresh: z
+    .union([z.literal("1"), z.literal("true"), z.literal("yes"), z.boolean()])
+    .optional()
+    .transform((v) => v === true || v === "1" || v === "true" || v === "yes"),
 });

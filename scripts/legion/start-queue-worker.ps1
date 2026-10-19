@@ -86,3 +86,58 @@ if (Test-Path $pidFile) {
 } else {
   Write-Host "Worker uruchomiony (brak pid.txt jeszcze) — log: $logFile"
 }
+
+# Gallery index watcher — worker NIE dopisuje aigen-gallery-index.json.
+# Bez tego nowe wideo znikają z Galerii aż do ręcznego seeda.
+$galleryWatchers = @(
+  (Join-Path $PSScriptRoot "aigen-gallery-index-watcher.py"),
+  (Join-Path $root "scripts\legion\aigen-gallery-index-watcher.py"),
+  (Join-Path $root "scripts\aigen-gallery-index-watcher.py")
+)
+$galleryPy = $galleryWatchers | Where-Object { Test-Path $_ } | Select-Object -First 1
+$galleryPidFile = Join-Path $workerDir "gallery-index-watcher.pid"
+$galleryLog = Join-Path $workerDir "gallery-index-watcher.log"
+
+function Test-GalleryWatcherAlive([int]$ProcId) {
+  $p = Get-Process -Id $ProcId -ErrorAction SilentlyContinue
+  if (-not $p) { return $false }
+  $name = $p.ProcessName.ToLowerInvariant()
+  return ($name -match "python|py|pythonw")
+}
+
+$galleryRunning = $false
+if (Test-Path $galleryPidFile) {
+  $gRaw = (Get-Content $galleryPidFile -Raw).Trim()
+  $gId = 0
+  if ([int]::TryParse($gRaw, [ref]$gId) -and $gId -gt 0 -and (Test-GalleryWatcherAlive $gId)) {
+    Write-Host "Gallery index watcher juz dziala (PID $gId)"
+    $galleryRunning = $true
+  } else {
+    Remove-Item $galleryPidFile -Force -ErrorAction SilentlyContinue
+  }
+}
+
+if (-not $galleryRunning -and $galleryPy) {
+  # Skopiuj lib obok watchera jeśli brak w Comfy scripts/
+  $libSrc = Join-Path $PSScriptRoot "..\aigen_gallery_index.py"
+  $libDst = Join-Path $root "scripts\aigen_gallery_index.py"
+  if ((Test-Path $libSrc) -and -not (Test-Path $libDst)) {
+    New-Item -ItemType Directory -Force -Path (Split-Path $libDst) | Out-Null
+    Copy-Item $libSrc $libDst -Force
+    Write-Host "Skopiowano aigen_gallery_index.py → $libDst"
+  }
+  Write-Host "Start gallery index watcher: $galleryPy"
+  $gArgs = @(
+    $galleryPy,
+    "--comfy-root", $root,
+    "--comfy-url", "http://127.0.0.1:8188",
+    "--poll", "5"
+  )
+  $gProc = Start-Process -FilePath $py -ArgumentList $gArgs -WorkingDirectory $root `
+    -RedirectStandardOutput $galleryLog -RedirectStandardError $galleryLog `
+    -WindowStyle Hidden -PassThru
+  Set-Content -Path $galleryPidFile -Value "$($gProc.Id)" -NoNewline
+  Write-Host "Gallery index watcher PID: $($gProc.Id)"
+} elseif (-not $galleryPy) {
+  Write-Host "Brak aigen-gallery-index-watcher.py — galeria wymaga seeda po jobach worker."
+}

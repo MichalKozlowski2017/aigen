@@ -8,6 +8,33 @@ import { normalizeComfyMediaRef, type ComfyMediaRef } from "./comfy-media";
 export const GALLERY_INDEX_FILENAME = "aigen-gallery-index.json";
 const GALLERY_INDEX_MAX = 200;
 const INDEX_VERSION = 1;
+/** Krótki cache odczytu indeksu (Vercel + tunel) — unikaj /view na każdy filtr UI. */
+const INDEX_CACHE_TTL_MS = 15_000;
+
+type IndexCache = {
+  at: number;
+  items: GalleryIndexEntry[];
+};
+
+declare global {
+  var __aigenGalleryIndexCache: IndexCache | undefined;
+}
+
+function indexCacheGet(): GalleryIndexEntry[] | null {
+  const c = globalThis.__aigenGalleryIndexCache;
+  if (!c) return null;
+  if (Date.now() - c.at > INDEX_CACHE_TTL_MS) return null;
+  return c.items;
+}
+
+function indexCacheSet(items: GalleryIndexEntry[]): void {
+  globalThis.__aigenGalleryIndexCache = { at: Date.now(), items };
+}
+
+/** Wymuś ponowny odczyt indeksu (przycisk Odśwież / po zapisie). */
+export function invalidateGalleryIndexCache(): void {
+  globalThis.__aigenGalleryIndexCache = undefined;
+}
 
 export type GalleryIndexEntry = ComfyMediaRef & {
   mtimeMs?: number;
@@ -64,14 +91,25 @@ export function parseGalleryIndex(raw: string): GalleryIndexEntry[] {
  * Brak pliku (404) → []; błąd sieci/timeout → rzuca (żeby galeria mogła
  * pokazać „indeks: …” zamiast cicho wracać pustą listę).
  */
-export async function loadGalleryIndex(): Promise<GalleryIndexEntry[]> {
+export async function loadGalleryIndex(options?: {
+  bypassCache?: boolean;
+}): Promise<GalleryIndexEntry[]> {
+  if (!options?.bypassCache) {
+    const cached = indexCacheGet();
+    if (cached) return cached;
+  }
   const text = await fetchComfyViewText(GALLERY_INDEX_FILENAME, "", "input", {
     timeoutMs: 12_000,
     minBytes: 2,
     throwOnError: true,
   });
-  if (!text) return [];
-  return parseGalleryIndex(text);
+  if (!text) {
+    indexCacheSet([]);
+    return [];
+  }
+  const items = parseGalleryIndex(text);
+  indexCacheSet(items);
+  return items;
 }
 
 /**
@@ -96,7 +134,8 @@ export async function recordGalleryOutputs(
   }
 
   try {
-    const existing = await loadGalleryIndex();
+    // Zawsze świeży odczyt przed merge — unikaj stale cache przy zapisie
+    const existing = await loadGalleryIndex({ bypassCache: true });
     const byKey = new Map<string, GalleryIndexEntry>();
     for (const e of existing) byKey.set(entryKey(e), e);
     for (const e of incoming) byKey.set(entryKey(e), e);
@@ -117,8 +156,10 @@ export async function recordGalleryOutputs(
       overwrite: true,
       type: "input",
     });
+    indexCacheSet(items);
     return { ok: true, count: items.length };
   } catch (err) {
+    invalidateGalleryIndexCache();
     return {
       ok: false,
       count: 0,

@@ -1,6 +1,7 @@
 import { after, NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { isPipelineLegionWorker } from "@/lib/studio/config";
+import { recordGalleryOutputs } from "@/lib/studio/gallery-index";
 import {
   advancePipeline,
   getPipeline,
@@ -56,6 +57,23 @@ export async function GET(
       ? ((await getPipeline(id)) ?? existing)
       : await advancePipeline(id);
     const job = pipelineToJobView(pipeline);
+
+    // Legion queue-worker kończy stitch lokalnie — finishStitch na Vercel
+    // nie biegnie. Dopisz outputs przy pollu completed (idempotentny merge).
+    if (
+      pipeline.status === "completed" &&
+      pipeline.outputs.length > 0
+    ) {
+      after(async () => {
+        await recordGalleryOutputs(
+          pipeline.outputs.map((o) => ({
+            filename: o.filename,
+            subfolder: o.subfolder,
+            type: o.type || "output",
+          }))
+        );
+      });
+    }
 
     if (
       !legionWorker &&

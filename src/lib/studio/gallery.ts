@@ -5,7 +5,10 @@ import {
   listComfyInternalFiles,
   withComfyRetry,
 } from "./comfy-client";
-import { loadGalleryIndex } from "./gallery-index";
+import {
+  invalidateGalleryIndexCache,
+  loadGalleryIndex,
+} from "./gallery-index";
 import { normalizeComfyMediaRef } from "./comfy-media";
 import { outputRoot, resolveOutputFile } from "./paths";
 import type { GalleryItem } from "./types";
@@ -142,20 +145,30 @@ function pushGalleryRef(
 export async function listGalleryFromComfy(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
-}): Promise<{ items: GalleryItem[]; error: string | null }> {
+  offset?: number;
+  /** Pomiń cache indeksu (Odśwież). */
+  refresh?: boolean;
+}): Promise<{ items: GalleryItem[]; error: string | null; total?: number }> {
   const kindFilter = options.kind ?? "all";
-  const limit = options.limit ?? 60;
+  const limit = Math.min(options.limit ?? 60, 120);
+  const offset = Math.max(0, options.offset ?? 0);
   const seen = new Set<string>();
   const refs: ComfyGalleryRef[] = [];
   const errors: string[] = [];
   let indexCount = 0;
 
   // 1) Indeks — mały JSON, najstabilniejszy przez Quick Tunnel.
+  if (options.refresh) {
+    invalidateGalleryIndexCache();
+  }
   try {
-    const indexed = await withComfyRetry(() => loadGalleryIndex(), {
-      attempts: 2,
-      delayMs: 400,
-    });
+    const indexed = await withComfyRetry(
+      () => loadGalleryIndex({ bypassCache: Boolean(options.refresh) }),
+      {
+        attempts: 2,
+        delayMs: 400,
+      }
+    );
     indexCount = indexed.length;
     for (const o of indexed) {
       pushGalleryRef(
@@ -259,12 +272,14 @@ export async function listGalleryFromComfy(options: {
   }
 
   items.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const sliced = items.slice(0, limit);
+  const total = items.length;
+  const sliced = items.slice(offset, offset + limit);
 
   if (sliced.length === 0 && errors.length > 0) {
     return {
       items: [],
       error: `Galeria Comfy: ${errors.join("; ")}`,
+      total: 0,
     };
   }
 
@@ -273,16 +288,23 @@ export async function listGalleryFromComfy(options: {
     return {
       items: sliced,
       error: `Galeria częściowa (bez indeksu): ${errors.join("; ")}`,
+      total,
     };
   }
 
-  return { items: sliced, error: null };
+  return { items: sliced, error: null, total };
 }
 
 async function listGalleryFromDisk(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
-}): Promise<{ items: GalleryItem[]; configured: boolean; error: string | null }> {
+  offset?: number;
+}): Promise<{
+  items: GalleryItem[];
+  configured: boolean;
+  error: string | null;
+  total?: number;
+}> {
   const root = outputRoot();
   if (!root) {
     return {
@@ -305,7 +327,8 @@ async function listGalleryFromDisk(options: {
   const files: { abs: string; rel: string }[] = [];
   await walk(root, root, files);
 
-  const limit = options.limit ?? 60;
+  const limit = Math.min(options.limit ?? 60, 120);
+  const offset = Math.max(0, options.offset ?? 0);
   const kindFilter = options.kind ?? "all";
 
   const withStat = await Promise.all(
@@ -334,12 +357,12 @@ async function listGalleryFromDisk(options: {
     })
   );
 
-  const items = withStat
+  const all = withStat
     .filter((x): x is GalleryItem => Boolean(x))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs)
-    .slice(0, limit);
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const items = all.slice(offset, offset + limit);
 
-  return { items, configured: true, error: null };
+  return { items, configured: true, error: null, total: all.length };
 }
 
 /**
@@ -349,11 +372,14 @@ async function listGalleryFromDisk(options: {
 export async function listGallery(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
+  offset?: number;
+  refresh?: boolean;
 }): Promise<{
   items: GalleryItem[];
   configured: boolean;
   error: string | null;
   source: "local" | "comfy" | "none";
+  total?: number;
 }> {
   const disk = await listGalleryFromDisk(options);
   if (disk.configured && !disk.error) {
@@ -370,6 +396,7 @@ export async function listGallery(options: {
       configured: true,
       error: comfy.error,
       source: "comfy",
+      total: comfy.total,
     };
   }
 
@@ -384,6 +411,7 @@ export async function listGallery(options: {
       comfy.error ??
       "Brak galerii: ustaw COMFYUI_OUTPUT_DIR (panel lokalny) albo upewnij się, że COMFYUI_URL / tunel działa (produkcja czyta historię Comfy).",
     source: "none",
+    total: 0,
   };
 }
 
