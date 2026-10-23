@@ -50,6 +50,19 @@ export function getStudioPassword(): string | null {
 }
 
 /**
+ * Bazowy URL endpointu sterowania na Legionie (NIE COMFYUI_URL).
+ * Pusty = przełącznik w panelu niedostępny. Sekret: LEGION_ENGINE_SECRET.
+ */
+export function getLegionEngineUrl(): string | null {
+  return trimOrUndefined(process.env.LEGION_ENGINE_URL) ?? null;
+}
+
+/** Bearer do Legion engine-control. Nie jest to STUDIO_PASSWORD ani COMFY_URL_UPDATE_SECRET. */
+export function getLegionEngineSecret(): string | null {
+  return trimOrUndefined(process.env.LEGION_ENGINE_SECRET) ?? null;
+}
+
+/**
  * true = eksperymentalny tryb „Legion worker SoT” (panel GET bez advance).
  * **Domyślnie wyłączone** — nie ustawiaj `PIPELINE_LEGION_WORKER=1` w produkcji
  * bez świadomego protokołu (register nie ma osobnego auth poza STUDIO_PASSWORD).

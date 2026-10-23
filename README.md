@@ -60,6 +60,8 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel: `/history` + indeks w Comfy input |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |
+| `LEGION_ENGINE_URL` | Adres sterowania GPU na Legionie (`engine-control.py`, **nie** tunel Comfy). Puste = przełącznik niedostępny |
+| `LEGION_ENGINE_SECRET` | Bearer do tego adresu. To nie jest `STUDIO_PASSWORD` ani `COMFY_URL_UPDATE_SECRET` |
 | `PIPELINE_LEGION_WORKER` | **Zostaw wyłączone.** Eksperymentalne; nie włączać domyślnie (register bez osobnego auth). Opcjonalny `aigen-queue-worker.py` na Legionie jest osobny i nie wymaga tej flagi. |
 
 ## Skrypty

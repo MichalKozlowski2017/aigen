@@ -146,6 +146,25 @@ function Start-WorkerIfNeeded {
   & $workerScript -ComfyRoot $root
 }
 
+function Start-EngineControlIfNeeded {
+  # Osobny proces (port 8199). Zostaje, gdy stopujemy Comfy na 8188 —
+  # panel musi moc wrocic z kodera na Comfy.
+  $ctl = Join-Path $PSScriptRoot "start-engine-control.ps1"
+  if (-not (Test-Path $ctl)) {
+    Write-StackLog "Brak start-engine-control.ps1 — pomijam sterowanie GPU"
+    return
+  }
+  if (-not $env:LEGION_ENGINE_SECRET) {
+    Write-StackLog "Engine control pominiety (ustaw LEGION_ENGINE_SECRET — bez sekretu nie nasluchujemy)"
+    return
+  }
+  try {
+    & $ctl
+  } catch {
+    Write-StackLog "Engine control nieudany: $($_.Exception.Message)"
+  }
+}
+
 function Publish-ComfyUrlIfConfigured {
   if (-not (Test-Path $urlFile)) { return }
   $panel = $env:AIGEN_PANEL_URL
@@ -173,6 +192,7 @@ Start-ComfyIfNeeded
 Start-TunnelIfNeeded
 Publish-ComfyUrlIfConfigured
 Start-WorkerIfNeeded
+Start-EngineControlIfNeeded
 Write-StackLog "=== stack gotowy ==="
 if (Test-Path $urlFile) {
   $finalUrl = (Get-Content $urlFile -Raw).Trim()

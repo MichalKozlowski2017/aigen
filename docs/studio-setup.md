@@ -65,6 +65,7 @@ STUDIO_PASSWORD=...
 - **Autostart Legion:** `scripts/legion/start-comfy-stack.ps1` (Comfy + Quick Tunnel + queue worker). Bez domeny: `AIGEN_PANEL_URL` + `COMFY_URL_UPDATE_SECRET` → auto `publish-comfy-url.ps1`. Opcjonalnie `install-startup-shortcut.ps1`. Szczegóły: `scripts/legion/README.md`.
 - **Named Tunnel / Quick auto-sync:** [docs/named-cloudflare-tunnel.md](named-cloudflare-tunnel.md).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
+- **Przełącznik ComfyUI / Qwen:** działa z panelu na Vercel. Next **nie** uruchamia procesów. Woła `LEGION_ENGINE_URL` (osobny hostname niż tunel Comfy) z `Authorization: Bearer LEGION_ENGINE_SECRET`. Bez URL kontrolka jest niedostępna. Aktywne zadanie w kolejce Comfy wymaga potwierdzenia w UI. Koder: stop portu 8188, potem `C:\Users\mkozl\Models\start-qwen-coder.ps1` (albo `QWEN_CODER_START_SCRIPT`). Comfy zostaje wyłączone, dopóki koder trzyma GPU. Szczegóły: `scripts/legion/README.md`.
 - **Pipeline:** patrz §6 — awaited `after()` + GET advance + durable JSON; flaga Legion opcjonalna/eksperymentalna.
 
 ## 3. Uruchomienie razem
@@ -179,6 +180,7 @@ Endpointy:
 | `Galeria Comfy: … fetch failed → host` | Vercel `COMFYUI_URL` nie żyje (stary Quick Tunnel). Odczytaj `logs/cloudflared-tunnel-url.txt`, zaktualizuj ENV, redeploy. Preferuj Named Tunnel. |
 | `historia`/`internal/files` fail, ale galeria działa | OK — UI idzie z indeksu; flaky endpointy są pomijane gdy indeks ma wpisy |
 | Pobieranie zablokowane | tylko lokalny panel: brak `COMFYUI_MODELS_DIR` |
+| Przełącznik Qwen niedostępny | brak `LEGION_ENGINE_URL` / `LEGION_ENGINE_SECRET` w panelu. Tunel Comfy (`:8188`) nie steruje procesami |
 | Wideo pada na node | brak Wan / VHS / obrazu w `input` |
 | Fast bez przyspieszenia | brak Wan 2.2 MoE / brak LoRA lightx2v 2.1 — fallback klasyczny Fast |
 | Fast idzie 2.1 mimo Wan 2.2 na dysku | brak pary LoRA high+low (albo fused distill) — dołóż LoRAs |

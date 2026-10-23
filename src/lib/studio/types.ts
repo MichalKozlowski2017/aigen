@@ -75,6 +75,25 @@ export type DownloadJob = {
   finishedAt: number | null;
 };
 
+export type EngineSide = "comfy" | "coder" | "neither" | "both";
+
+export type EngineSwitchTarget = "comfy" | "coder";
+
+/** Widok przełącznika GPU. Sekret sterowania nigdy tu nie trafia. */
+export type EngineSwitchView = {
+  ok: true;
+  available: boolean;
+  unavailableReason: string | null;
+  side: EngineSide | null;
+  comfyOnline: boolean;
+  coderOnline: boolean;
+  comfyQueueRunning: boolean;
+  switching: boolean;
+  switchTarget: EngineSwitchTarget | null;
+  switchError: string | null;
+  unreachable: boolean;
+};
+
 export type StudioPublicConfig = {
   comfyUrl: string;
   /** true gdy COMFYUI_URL nie wskazuje na localhost (Vercel + tunel). */
