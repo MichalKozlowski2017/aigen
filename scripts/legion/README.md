@@ -57,6 +57,25 @@ Skrót:
 
 Po Named nie musisz klepać Settings po reboocie Legionu.
 
+## Przełącznik GPU (ComfyUI ↔ Qwen)
+
+Panel (także na Vercel) nie ubija procesów sam. Woła mały endpoint na Legionie:
+
+- `scripts/legion/engine-control.py` — `127.0.0.1:8199` (zostaje, gdy Comfy pada)
+- auth: `Authorization: Bearer` + `LEGION_ENGINE_SECRET` (bez sekretu proces **nie** nasłuchuje)
+- start: `scripts/legion/start-engine-control.ps1` (albo przez `start-comfy-stack.ps1`, gdy sekret jest ustawiony)
+
+To **nie** jest tunel Comfy. `COMFYUI_URL` wskazuje API Comfy (`127.0.0.1:8188`) i nie jest chronione hasłem panelu. llama-server (`0.0.0.0:8080`) zostaje w LAN. Na Named Tunnel dodaj drugi hostname → `http://127.0.0.1:8199` (patrz `docs/named-cloudflare-tunnel.md`). W panelu: `LEGION_ENGINE_URL` + ten sam sekret. Bez URL przełącznik jest niedostępny.
+
+Zachowanie:
+
+1. **Qwen** — jeśli Comfy ma aktywne zadanie (`queue_running`), pierwsze żądanie go nie zabija (409, UI prosi o potwierdzenie). Potem stop PID na porcie 8188 (`stop-port-listener.ps1`, nie nazwa `python`), start `start-qwen-coder.ps1`, czekanie na `GET http://127.0.0.1:8080/v1/models`.
+2. **ComfyUI** — stop PID na porcie 8080, potem `start-comfy-stack.ps1`, czekanie aż Comfy odpowie.
+
+Domyślny skrypt kodera: `C:\Users\mkozl\Models\start-qwen-coder.ps1`. Override na Legionie: `QWEN_CODER_START_SCRIPT`. Katalog Comfy: `COMFYUI_ROOT` (inaczej resolver w `start-comfy-stack.ps1`, w tym `C:\Users\mkozl\Sites\ComfyUI`).
+
+Dopóki koder trzyma GPU, Comfy zostaje wyłączone. `POST /api/comfy/free` tylko zdejmuje wagi — przełącznik zatrzymuje proces.
+
 ## Galeria po reboocie
 
 `/history` Comfy jest puste po restarcie. Trwały indeks:
