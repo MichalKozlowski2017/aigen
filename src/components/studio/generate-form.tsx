@@ -15,6 +15,15 @@ import {
   type ImageModelOption,
 } from "@/lib/studio/flux";
 import {
+  IMAGE_DIMENSION_MAX,
+  IMAGE_DIMENSION_MIN,
+  IMAGE_DIMENSION_STEP,
+  IMAGE_FORMAT_CUSTOM,
+  IMAGE_FORMAT_PRESETS,
+  getImageFormatPreset,
+  type ImageFormatSelection,
+} from "@/lib/studio/image-presets";
+import {
   shouldFreeBeforeJob,
   writeLastEngineFamily,
 } from "@/lib/studio/last-engine";
@@ -186,7 +195,7 @@ export function GenerateForm({
         ? LTX_UI_LIMITS
         : SVD_UI_LIMITS;
   const [width, setWidth] = useState<number>(() => {
-    if (kind !== "video") return 1024;
+    if (kind !== "video") return getImageFormatPreset("square").width;
     const stored = readStoredOrientation();
     const resolved = resolveVideoOrientation({
       mode: stored.mode,
@@ -195,7 +204,7 @@ export function GenerateForm({
     return wanSizeForOrientation(DEFAULT_WAN_QUALITY_PRESET, resolved).width;
   });
   const [height, setHeight] = useState<number>(() => {
-    if (kind !== "video") return 1024;
+    if (kind !== "video") return getImageFormatPreset("square").height;
     const stored = readStoredOrientation();
     const resolved = resolveVideoOrientation({
       mode: stored.mode,
@@ -203,6 +212,8 @@ export function GenerateForm({
     });
     return wanSizeForOrientation(DEFAULT_WAN_QUALITY_PRESET, resolved).height;
   });
+  /** Kwadrat przy 1024×1024. Edycja pól przełącza na Własny. */
+  const [imageFormat, setImageFormat] = useState<ImageFormatSelection>("square");
   const [seed, setSeed] = useState(-1);
   const [batch, setBatch] = useState(1);
   const [durationSec, setDurationSec] = useState<number>(
@@ -400,6 +411,14 @@ export function GenerateForm({
       checkpoints.find((c) => c.toLowerCase().includes("wan")) ??
       DEFAULT_WAN_UNET
     );
+  }
+
+  function applyImageFormat(id: ImageFormatSelection) {
+    setImageFormat(id);
+    if (id === "custom") return;
+    const preset = getImageFormatPreset(id);
+    setWidth(preset.width);
+    setHeight(preset.height);
   }
 
   function applyWanPreset(id: WanQualityPresetId) {
@@ -1774,6 +1793,41 @@ export function GenerateForm({
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
             />
           </Field>
+          {kind === "image" ? (
+            <fieldset className="space-y-2 sm:col-span-2">
+              <legend className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                Format
+              </legend>
+              <div
+                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+                role="group"
+                aria-label="Format obrazu"
+              >
+                {[...IMAGE_FORMAT_PRESETS, IMAGE_FORMAT_CUSTOM].map((opt) => {
+                  const selected = imageFormat === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => applyImageFormat(opt.id)}
+                      className={[
+                        "min-h-11 rounded-lg border px-3 py-2 text-center text-sm transition",
+                        selected
+                          ? "border-teal-400/50 bg-teal-400/10 text-teal-50"
+                          : "border-studio-border bg-studio-surface text-stone-300 hover:border-studio-border-strong",
+                      ].join(" ")}
+                    >
+                      <span className="block font-medium">{opt.label}</span>
+                      <span className="mt-0.5 block text-[11px] text-stone-500">
+                        {opt.blurb}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+          ) : null}
           <Field
             label={
               wanFastLocked ? "Szerokość (Fast = 480p)" : "Szerokość"
@@ -1781,8 +1835,8 @@ export function GenerateForm({
           >
             <input
               type="number"
-              min={256}
-              max={kind === "video" ? videoLimits.maxWidth : 2048}
+              min={kind === "image" ? IMAGE_DIMENSION_MIN : 256}
+              max={kind === "video" ? videoLimits.maxWidth : IMAGE_DIMENSION_MAX}
               step={
                 kind === "video"
                   ? videoEngine === "ltx"
@@ -1790,7 +1844,7 @@ export function GenerateForm({
                     : videoEngine === "wan"
                       ? 16
                       : 64
-                  : 64
+                  : IMAGE_DIMENSION_STEP
               }
               value={
                 wanFastGeo?.locked
@@ -1798,7 +1852,10 @@ export function GenerateForm({
                   : (wanOrientedSize?.width ?? width)
               }
               disabled={wanFastLocked || Boolean(wanOrientedSize)}
-              onChange={(e) => setWidth(Number(e.target.value))}
+              onChange={(e) => {
+                setWidth(Number(e.target.value));
+                if (kind === "image") setImageFormat("custom");
+              }}
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
@@ -1809,8 +1866,8 @@ export function GenerateForm({
           >
             <input
               type="number"
-              min={256}
-              max={kind === "video" ? videoLimits.maxHeight : 2048}
+              min={kind === "image" ? IMAGE_DIMENSION_MIN : 256}
+              max={kind === "video" ? videoLimits.maxHeight : IMAGE_DIMENSION_MAX}
               step={
                 kind === "video"
                   ? videoEngine === "ltx"
@@ -1818,7 +1875,7 @@ export function GenerateForm({
                     : videoEngine === "wan"
                       ? 16
                       : 64
-                  : 64
+                  : IMAGE_DIMENSION_STEP
               }
               value={
                 wanFastGeo?.locked
@@ -1826,7 +1883,10 @@ export function GenerateForm({
                   : (wanOrientedSize?.height ?? height)
               }
               disabled={wanFastLocked || Boolean(wanOrientedSize)}
-              onChange={(e) => setHeight(Number(e.target.value))}
+              onChange={(e) => {
+                setHeight(Number(e.target.value));
+                if (kind === "image") setImageFormat("custom");
+              }}
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
