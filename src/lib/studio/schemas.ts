@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VIDEO_ENGINE_IDS } from "./video-engines";
 
 export const generateBodySchema = z.object({
   kind: z.enum(["image", "video"]).default("image"),
@@ -24,10 +25,10 @@ export const generateBodySchema = z.object({
       type: z.string().max(40).optional().default("output"),
     })
     .optional(),
-  /** Silnik wideo: wan | ltx | svd | h3-lite (MiniMax-H3-Lite, pay-as-you-go) */
-  videoEngine: z.enum(["wan", "ltx", "svd", "h3-lite"]).optional(),
+  /** Silnik wideo: wan | ltx | svd albo opcja MiniMax (model + rozdzielczość, pay-as-you-go). */
+  videoEngine: z.enum(VIDEO_ENGINE_IDS).optional(),
   /**
-   * Bajty obrazu startowego (data URI) dla H3-Lite, gdy Comfy jest offline.
+   * Bajty obrazu startowego (data URI) dla MiniMax, gdy Comfy jest offline.
    * Nie wysyłaj tego pola dla Wan / LTX / SVD.
    */
   startImageDataUrl: z.string().max(8_000_000).optional(),

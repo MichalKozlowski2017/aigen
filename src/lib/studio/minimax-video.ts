@@ -3,6 +3,7 @@ import path from "node:path";
 import { uploadFileToComfy } from "./comfy-client";
 import { fetchComfyViewBlob } from "./comfy-client";
 import {
+  CLOUD_VIDEO_SUBDIR,
   cloudClipFilename,
   cloudClipRelativePath,
   fallbackGalleryRoot,
@@ -17,8 +18,13 @@ import {
   H3_LITE_UI_LIMITS,
   MINIMAX_API_KEY_ENV,
   MINIMAX_H3_LITE_MODEL,
-  clampH3LiteDuration,
-  h3LiteEstimatedUsd,
+  clampMinimaxDuration,
+  getMinimaxEngine,
+  isMinimaxVideoEngine,
+  minimaxEstimatedUsd,
+  type MinimaxModelId,
+  type MinimaxResolution,
+  type MinimaxVideoEngineId,
 } from "./video-engines";
 
 /**
@@ -108,18 +114,8 @@ export function minimaxQueryPath(taskId: string): string {
   return `/v2/query/video_generation/${encodeURIComponent(taskId)}`;
 }
 
-/**
- * Ciało create dla image-to-video H3-Lite.
- * I2V: text + image_url role=first_frame. Proporcje biorą się z obrazu
- * (API i tak traktuje ratio jako adaptive), więc ratio nie wysyłamy.
- * Ograniczenie „H3-Lite nie wspiera adaptive” dotyczy reference-to-video, nie I2V.
- */
-export function buildH3LiteCreateBody(input: {
-  prompt: string;
-  imageUrl: string;
-  durationSec: number;
-}): {
-  model: typeof MINIMAX_H3_LITE_MODEL;
+export type MinimaxCreateBody = {
+  model: MinimaxModelId;
   content: Array<
     | { type: "text"; text: string }
     | {
@@ -128,9 +124,22 @@ export function buildH3LiteCreateBody(input: {
         role: "first_frame";
       }
   >;
-  resolution: typeof H3_LITE_RESOLUTION;
+  resolution: MinimaxResolution;
   duration: number;
-} {
+};
+
+/**
+ * Ciało create dla image-to-video na POST /v2/video_generation.
+ * I2V: text + image_url role=first_frame. Proporcje biorą się z obrazu
+ * (API i tak traktuje ratio jako adaptive), więc ratio nie wysyłamy.
+ * Ograniczenie „H3-Lite nie wspiera adaptive” dotyczy reference-to-video, nie I2V.
+ */
+export function buildMinimaxCreateBody(input: {
+  engine: MinimaxVideoEngineId;
+  prompt: string;
+  imageUrl: string;
+  durationSec: number;
+}): MinimaxCreateBody {
   const text = input.prompt.trim().slice(0, PROMPT_MAX_CHARS);
   if (!text) {
     throw new MinimaxRequestError("Prompt po boostcie jest pusty.");
@@ -139,8 +148,9 @@ export function buildH3LiteCreateBody(input: {
   if (!imageUrl) {
     throw new MinimaxRequestError("Brak obrazu startowego.");
   }
+  const spec = getMinimaxEngine(input.engine);
   return {
-    model: MINIMAX_H3_LITE_MODEL,
+    model: spec.model,
     content: [
       { type: "text", text },
       {
@@ -149,8 +159,28 @@ export function buildH3LiteCreateBody(input: {
         role: "first_frame",
       },
     ],
+    resolution: spec.resolution,
+    duration: clampMinimaxDuration(spec.id, input.durationSec),
+  };
+}
+
+/** Ciało create dla MiniMax-H3-Lite 768P (dotychczasowy silnik). */
+export function buildH3LiteCreateBody(input: {
+  prompt: string;
+  imageUrl: string;
+  durationSec: number;
+}): {
+  model: typeof MINIMAX_H3_LITE_MODEL;
+  content: MinimaxCreateBody["content"];
+  resolution: typeof H3_LITE_RESOLUTION;
+  duration: number;
+} {
+  const body = buildMinimaxCreateBody({ engine: "h3-lite", ...input });
+  return {
+    model: MINIMAX_H3_LITE_MODEL,
+    content: body.content,
     resolution: H3_LITE_RESOLUTION,
-    duration: clampH3LiteDuration(input.durationSec),
+    duration: body.duration,
   };
 }
 
@@ -158,7 +188,7 @@ function readApiKey(): string {
   const key = process.env[MINIMAX_API_KEY_ENV]?.trim();
   if (!key) {
     throw new MinimaxConfigError(
-      `Brak ${MINIMAX_API_KEY_ENV}. Ustaw klucz pay-as-you-go MiniMax (nie subskrypcję i nie pakiet wideo Hailuo) — H3-Lite rozlicza się z salda.`
+      `Brak ${MINIMAX_API_KEY_ENV}. Ustaw klucz pay-as-you-go MiniMax (nie subskrypcję i nie pakiet wideo Hailuo) — modele H3 rozliczają się z salda.`
     );
   }
   return key;
@@ -168,25 +198,32 @@ function galleryFileUrl(relativePath: string): string {
   return `/api/gallery/file?path=${encodeURIComponent(relativePath)}`;
 }
 
+function legacyH3LiteFilename(taskId: string): string {
+  const safe = taskId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
+  return `h3-lite-${safe || "clip"}.mp4`;
+}
+
 async function fileSavedOnDisk(taskId: string): Promise<MinimaxSavedOutput | null> {
-  const filename = cloudClipFilename(taskId);
-  const relativePath = cloudClipRelativePath(taskId);
+  const names = [cloudClipFilename(taskId), legacyH3LiteFilename(taskId)];
   const roots = [outputGalleryRoot(), fallbackGalleryRoot()];
-  for (const root of roots) {
-    if (!root) continue;
-    const abs = path.join(root, "studio", filename);
-    try {
-      const st = await fs.stat(abs);
-      if (st.isFile() && st.size > 1024) {
-        return {
-          filename,
-          subfolder: root === outputGalleryRoot() ? "studio" : "",
-          type: "output",
-          url: galleryFileUrl(relativePath),
-        };
+  for (const filename of names) {
+    const relativePath = `${CLOUD_VIDEO_SUBDIR}/${filename}`;
+    for (const root of roots) {
+      if (!root) continue;
+      const abs = path.join(root, "studio", filename);
+      try {
+        const st = await fs.stat(abs);
+        if (st.isFile() && st.size > 1024) {
+          return {
+            filename,
+            subfolder: root === outputGalleryRoot() ? "studio" : "",
+            type: "output",
+            url: galleryFileUrl(relativePath),
+          };
+        }
+      } catch {
+        // brak pliku
       }
-    } catch {
-      // brak pliku
     }
   }
   return null;
@@ -283,7 +320,7 @@ async function imageUrlFromComfy(body: GenerateBody): Promise<string> {
   const startImage = body.startImage?.trim();
   if (!startImage && !body.startImageSource?.filename) {
     throw new MinimaxRequestError(
-      "Dodaj obraz startowy. H3-Lite jest tylko image-to-video."
+      "Dodaj obraz startowy. MiniMax jest tylko image-to-video."
     );
   }
   try {
@@ -301,7 +338,7 @@ async function imageUrlFromComfy(body: GenerateBody): Promise<string> {
     return `data:${safeMime};base64,${buf.toString("base64")}`;
   } catch {
     throw new MinimaxRequestError(
-      "ComfyUI nie oddał obrazu startowego. Upuść plik jeszcze raz — H3-Lite wyśle go bez Comfy."
+      "ComfyUI nie oddał obrazu startowego. Upuść plik jeszcze raz — MiniMax wyśle go bez Comfy."
     );
   }
 }
@@ -367,7 +404,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
-async function createTask(body: ReturnType<typeof buildH3LiteCreateBody>): Promise<string> {
+async function createTask(body: MinimaxCreateBody): Promise<string> {
   const json = await minimaxFetch(MINIMAX_CREATE_PATH, {
     method: "POST",
     body: JSON.stringify(body),
@@ -487,7 +524,7 @@ function jobFromSaved(promptId: string, output: MinimaxSavedOutput): JobView {
   return emptyJob(promptId, {
     status: "completed",
     outputs: [output],
-    phase: "Klip H3-Lite zapisany w galerii",
+    phase: "Klip MiniMax zapisany w galerii",
     stage: "done",
     percent: 100,
   });
@@ -532,8 +569,8 @@ async function advanceTask(taskId: string): Promise<JobView> {
       outputs: [],
       phase:
         snapshot.status === "queued"
-          ? "MiniMax-H3-Lite w kolejce"
-          : "MiniMax-H3-Lite generuje klip",
+          ? "MiniMax w kolejce"
+          : "MiniMax generuje klip",
       stage: snapshot.status === "queued" ? "queued" : "running",
       percent: snapshot.status === "queued" ? 12 : 55,
     });
@@ -582,16 +619,16 @@ export async function pollMinimaxUntilSaved(taskId: string): Promise<void> {
   }
 }
 
-export async function startH3LiteVideo(body: GenerateBody): Promise<{
+export async function startMinimaxVideo(body: GenerateBody): Promise<{
   taskId: string;
   promptId: string;
-  engine: "h3-lite";
-  template: "minimax-h3-lite";
+  engine: MinimaxVideoEngineId;
+  template: `minimax-${MinimaxVideoEngineId}`;
   kind: "video";
   durationSec: number;
   estimatedUsd: number;
-  model: typeof MINIMAX_H3_LITE_MODEL;
-  resolution: typeof H3_LITE_RESOLUTION;
+  model: MinimaxModelId;
+  resolution: MinimaxResolution;
   modelPrompt: string;
   modelNegative: string;
   promptBoost: {
@@ -604,22 +641,27 @@ export async function startH3LiteVideo(body: GenerateBody): Promise<{
   };
 }> {
   if (body.kind !== "video") {
-    throw new MinimaxRequestError("H3-Lite jest tylko dla wideo.");
+    throw new MinimaxRequestError("MiniMax jest tylko dla wideo.");
+  }
+  if (!isMinimaxVideoEngine(body.videoEngine)) {
+    throw new MinimaxRequestError("To nie jest silnik MiniMax.");
   }
   if (!body.startImage?.trim() && !body.startImageDataUrl?.trim()) {
     throw new MinimaxRequestError(
-      "H3-Lite wymaga obrazu startowego (image-to-video)."
+      "MiniMax wymaga obrazu startowego (image-to-video)."
     );
   }
 
+  const spec = getMinimaxEngine(body.videoEngine);
   const boost = await preparePromptForModel({
     prompt: body.prompt,
     negativePrompt: "",
     kind: "video",
   });
-  const durationSec = clampH3LiteDuration(body.durationSec);
+  const durationSec = clampMinimaxDuration(spec.id, body.durationSec);
   const imageUrl = await resolveImageUrl(body);
-  const createBody = buildH3LiteCreateBody({
+  const createBody = buildMinimaxCreateBody({
+    engine: spec.id,
     prompt: boost.modelPrompt,
     imageUrl,
     durationSec,
@@ -629,13 +671,13 @@ export async function startH3LiteVideo(body: GenerateBody): Promise<{
   return {
     taskId,
     promptId: minimaxPromptId(taskId),
-    engine: "h3-lite",
-    template: "minimax-h3-lite",
+    engine: spec.id,
+    template: `minimax-${spec.id}`,
     kind: "video",
     durationSec,
-    estimatedUsd: h3LiteEstimatedUsd(durationSec),
-    model: MINIMAX_H3_LITE_MODEL,
-    resolution: H3_LITE_RESOLUTION,
+    estimatedUsd: minimaxEstimatedUsd(spec.id, durationSec),
+    model: spec.model,
+    resolution: spec.resolution,
     modelPrompt: boost.modelPrompt,
     modelNegative: boost.modelNegative,
     promptBoost: {
@@ -647,6 +689,11 @@ export async function startH3LiteVideo(body: GenerateBody): Promise<{
       warnings: boost.warnings,
     },
   };
+}
+
+/** MiniMax-H3-Lite 768P — dotychczasowa ścieżka, woła ten sam create. */
+export async function startH3LiteVideo(body: GenerateBody) {
+  return startMinimaxVideo({ ...body, videoEngine: "h3-lite" });
 }
 
 export { H3_LITE_UI_LIMITS };

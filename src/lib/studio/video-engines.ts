@@ -1,6 +1,30 @@
 /** Silniki wideo Studio + limity pod ~16 GB VRAM (RTX 5080) + 64 GB RAM offload. */
 
-export type VideoEngineId = "wan" | "ltx" | "svd" | "h3-lite";
+/**
+ * Modele z enum `model` na POST /v2/video_generation
+ * (OpenAPI platform.minimax.io, video generation v2).
+ * Hailuo jest na POST /v1/video_generation — ten enum go nie przyjmuje.
+ * Regeneracja (POST /v2/video_regeneration) nie jest modelem generacji.
+ */
+export type MinimaxModelId =
+  | "MiniMax-H3"
+  | "MiniMax-H3-Highspeed"
+  | "MiniMax-H3-Lite"
+  | "MiniMax-H3-Max";
+
+export type MinimaxResolution = "480P" | "768P" | "2K";
+
+/** Jedna opcja UI = model + rozdzielczość wyjścia. `h3-lite` zostaje Lite 768P. */
+export type MinimaxVideoEngineId =
+  | "h3-768p"
+  | "h3-2k"
+  | "h3-highspeed"
+  | "h3-lite"
+  | "h3-lite-480p"
+  | "h3-max"
+  | "h3-max-480p";
+
+export type VideoEngineId = "wan" | "ltx" | "svd" | MinimaxVideoEngineId;
 
 export const DEFAULT_VIDEO_ENGINE: VideoEngineId = "wan";
 
@@ -24,7 +48,7 @@ export const DEFAULT_LTX_CLIP = "t5xxl_fp8_e4m3fn_scaled.safetensors";
 export const FALLBACK_LTX_CLIP_FP16 = "t5xxl_fp16.safetensors";
 export const DEFAULT_CODEFORMER = "codeformer.pth";
 
-export const VIDEO_ENGINE_OPTIONS: Array<{
+const LOCAL_VIDEO_ENGINE_OPTIONS: Array<{
   id: VideoEngineId;
   label: string;
   blurb: string;
@@ -45,12 +69,6 @@ export const VIDEO_ENGINE_OPTIONS: Array<{
     id: "svd",
     label: "SVD (legacy)",
     blurb: "Krótki legacy draft — bez chunków.",
-  },
-  {
-    id: "h3-lite",
-    label: "H3-Lite (chmura)",
-    blurb:
-      "MiniMax-H3-Lite · 768P · pay-as-you-go · ~0,04 USD/s. Działa bez Comfy.",
   },
 ];
 
@@ -174,53 +192,222 @@ export const LTX_UI_LIMITS = {
 } as const;
 
 /**
- * MiniMax-H3-Lite image-to-video (oficjalne API pay-as-you-go).
- * Rozdzielczość 768P, czas całkowity 4–15 s. Domyślnie 5 s ≈ 0,20 USD.
+ * MiniMax image-to-video na POST /v2/video_generation (pay-as-you-go).
+ * Identyfikatory i pary rozdzielczości: OpenAPI v2 (26 Oct 2026).
+ * USD/s: kolumna „Output Video per second” z platform.minimax.io/docs/pricing/overview
+ * (ten sam dzień). Jeden obraz startowy mieści się w darmowym limicie zdjęć.
  * Klucz: MINIMAX_API_KEY — pay-as-you-go, nie subskrypcja i nie pakiet Hailuo.
+ * Hailuo (POST /v1/video_generation) i regeneracja (/v2/video_regeneration) nie wchodzą.
  */
-export const MINIMAX_H3_LITE_MODEL = "MiniMax-H3-Lite";
 export const MINIMAX_API_KEY_ENV = "MINIMAX_API_KEY";
-export const H3_LITE_RESOLUTION = "768P";
+
+export type MinimaxEngineSpec = {
+  id: MinimaxVideoEngineId;
+  choiceLabel: string;
+  model: MinimaxModelId;
+  resolution: MinimaxResolution;
+  usdPerSec: number;
+  minDurationSec: number;
+  maxDurationSec: number;
+  defaultDurationSec: number;
+  defaultFps: 24;
+};
+
+export const MINIMAX_VIDEO_ENGINES: readonly MinimaxEngineSpec[] = [
+  {
+    id: "h3-768p",
+    choiceLabel: "H3 768P",
+    model: "MiniMax-H3",
+    resolution: "768P",
+    usdPerSec: 0.08,
+    minDurationSec: 4,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-2k",
+    choiceLabel: "H3 2K",
+    model: "MiniMax-H3",
+    resolution: "2K",
+    usdPerSec: 0.13,
+    minDurationSec: 4,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-highspeed",
+    choiceLabel: "H3-Highspeed 768P",
+    model: "MiniMax-H3-Highspeed",
+    resolution: "768P",
+    usdPerSec: 0.06,
+    minDurationSec: 4,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-lite",
+    choiceLabel: "H3-Lite 768P",
+    model: "MiniMax-H3-Lite",
+    resolution: "768P",
+    usdPerSec: 0.04,
+    minDurationSec: 4,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-lite-480p",
+    choiceLabel: "H3-Lite 480P",
+    model: "MiniMax-H3-Lite",
+    resolution: "480P",
+    usdPerSec: 0.025,
+    minDurationSec: 4,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-max",
+    choiceLabel: "H3-Max 768P",
+    model: "MiniMax-H3-Max",
+    resolution: "768P",
+    usdPerSec: 0.08,
+    minDurationSec: 5,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+  {
+    id: "h3-max-480p",
+    choiceLabel: "H3-Max 480P",
+    model: "MiniMax-H3-Max",
+    resolution: "480P",
+    usdPerSec: 0.05,
+    minDurationSec: 5,
+    maxDurationSec: 15,
+    defaultDurationSec: 5,
+    defaultFps: 24,
+  },
+];
+
+const MINIMAX_BY_ID = new Map<MinimaxVideoEngineId, MinimaxEngineSpec>(
+  MINIMAX_VIDEO_ENGINES.map((spec) => [spec.id, spec])
+);
+
+export const VIDEO_ENGINE_IDS = [
+  "wan",
+  "ltx",
+  "svd",
+  ...MINIMAX_VIDEO_ENGINES.map((spec) => spec.id),
+] as const satisfies readonly VideoEngineId[];
+
+/** Cena wyjścia przy przycisku: 0,04 albo 0,025. */
+export function formatUsdPerSec(usdPerSec: number): string {
+  const digits = usdPerSec < 0.03 ? 3 : 2;
+  return usdPerSec.toFixed(digits).replace(".", ",");
+}
+
+export const VIDEO_ENGINE_OPTIONS: Array<{
+  id: VideoEngineId;
+  label: string;
+  blurb: string;
+}> = [
+  ...LOCAL_VIDEO_ENGINE_OPTIONS,
+  ...MINIMAX_VIDEO_ENGINES.map((spec) => ({
+    id: spec.id,
+    label: `${spec.choiceLabel} · ${formatUsdPerSec(spec.usdPerSec)} USD/s`,
+    blurb: `${spec.model} · ${spec.minDurationSec}–${spec.maxDurationSec} s · pay-as-you-go · bez Comfy`,
+  })),
+];
+
+export function isMinimaxVideoEngine(
+  value: unknown
+): value is MinimaxVideoEngineId {
+  return typeof value === "string" && MINIMAX_BY_ID.has(value as MinimaxVideoEngineId);
+}
+
+export function getMinimaxEngine(id: MinimaxVideoEngineId): MinimaxEngineSpec {
+  const spec = MINIMAX_BY_ID.get(id);
+  if (!spec) {
+    throw new Error(`Nieznany silnik MiniMax: ${id}`);
+  }
+  return spec;
+}
+
+function minimaxDisplaySide(resolution: MinimaxResolution): number {
+  if (resolution === "2K") return 1440;
+  if (resolution === "480P") return 480;
+  return 768;
+}
+
+export function minimaxUiLimits(id: MinimaxVideoEngineId) {
+  const spec = getMinimaxEngine(id);
+  const side = minimaxDisplaySide(spec.resolution);
+  return {
+    minDurationSec: spec.minDurationSec,
+    maxDurationSec: spec.maxDurationSec,
+    defaultDurationSec: spec.defaultDurationSec,
+    defaultFps: spec.defaultFps,
+    maxFps: spec.defaultFps,
+    defaultWidth: side,
+    defaultHeight: side,
+    maxWidth: side,
+    maxHeight: side,
+    note: `${spec.model} ${spec.resolution}, pay-as-you-go (~${formatUsdPerSec(spec.usdPerSec)} USD/s). Czas ${spec.minDurationSec}–${spec.maxDurationSec} s, domyślnie ${spec.defaultDurationSec} s. Obraz startowy to pierwsza klatka (kadr z obrazu). Comfy nie jest wymagane. Klucz MINIMAX_API_KEY (pay-as-you-go, nie pakiet Hailuo).`,
+  };
+}
+
+/** Lite 768P — dotychczasowy silnik, jedna z opcji katalogu. */
+export const MINIMAX_H3_LITE_MODEL = "MiniMax-H3-Lite" as const;
+export const H3_LITE_RESOLUTION = "768P" as const;
 export const H3_LITE_USD_PER_SEC = 0.04;
 
 export const H3_LITE_UI_LIMITS = {
-  minDurationSec: 4,
-  maxDurationSec: 15,
-  defaultDurationSec: 5,
-  defaultFps: 24,
-  maxFps: 24,
-  defaultWidth: 768,
-  defaultHeight: 768,
-  maxWidth: 768,
-  maxHeight: 768,
+  ...minimaxUiLimits("h3-lite"),
   note: "MiniMax-H3-Lite 768P, pay-as-you-go (~0,04 USD/s). Czas 4–15 s, domyślnie 5 s (~0,20 USD). Obraz startowy to pierwsza klatka. Comfy nie jest wymagane. Klucz MINIMAX_API_KEY (pay-as-you-go, nie pakiet Hailuo).",
 } as const;
 
-/** Czas H3-Lite: liczba całkowita w zakresie API. Brak wartości → 5 s. */
-export function clampH3LiteDuration(value: number | undefined | null): number {
+/** Czas wybranego silnika MiniMax: liczba całkowita w zakresie tego modelu. */
+export function clampMinimaxDuration(
+  id: MinimaxVideoEngineId,
+  value: number | undefined | null
+): number {
+  const spec = getMinimaxEngine(id);
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return H3_LITE_UI_LIMITS.defaultDurationSec;
+    return spec.defaultDurationSec;
   }
   const rounded = Math.round(value);
-  if (rounded < H3_LITE_UI_LIMITS.minDurationSec) {
-    return H3_LITE_UI_LIMITS.minDurationSec;
-  }
-  if (rounded > H3_LITE_UI_LIMITS.maxDurationSec) {
-    return H3_LITE_UI_LIMITS.maxDurationSec;
-  }
+  if (rounded < spec.minDurationSec) return spec.minDurationSec;
+  if (rounded > spec.maxDurationSec) return spec.maxDurationSec;
   return rounded;
 }
 
+export function minimaxEstimatedUsd(
+  id: MinimaxVideoEngineId,
+  durationSec: number
+): number {
+  const spec = getMinimaxEngine(id);
+  const seconds = clampMinimaxDuration(id, durationSec);
+  return Math.round(seconds * spec.usdPerSec * 100) / 100;
+}
+
+/** Czas H3-Lite 768P: liczba całkowita w zakresie API. Brak wartości → 5 s. */
+export function clampH3LiteDuration(value: number | undefined | null): number {
+  return clampMinimaxDuration("h3-lite", value);
+}
+
 export function h3LiteEstimatedUsd(durationSec: number): number {
-  const seconds = clampH3LiteDuration(durationSec);
-  return Math.round(seconds * H3_LITE_USD_PER_SEC * 100) / 100;
+  return minimaxEstimatedUsd("h3-lite", durationSec);
 }
 
 /** Silnik chmurowy nie czeka na bramkę zdrowia ComfyUI. */
 export function videoEngineSkipsComfyHealth(
   engine: string | undefined
 ): boolean {
-  return engine === "h3-lite";
+  return isMinimaxVideoEngine(engine);
 }
 
 export const SVD_UI_LIMITS = {
@@ -297,7 +484,10 @@ export function effectiveDurationSec(frames: number, fps: number): number {
 
 export function isVideoEngine(value: unknown): value is VideoEngineId {
   return (
-    value === "wan" || value === "ltx" || value === "svd" || value === "h3-lite"
+    value === "wan" ||
+    value === "ltx" ||
+    value === "svd" ||
+    isMinimaxVideoEngine(value)
   );
 }
 

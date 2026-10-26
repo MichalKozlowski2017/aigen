@@ -10,7 +10,7 @@ import {
   MinimaxConfigError,
   MinimaxRequestError,
   pollMinimaxUntilSaved,
-  startH3LiteVideo,
+  startMinimaxVideo,
 } from "@/lib/studio/minimax-video";
 import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
@@ -21,7 +21,7 @@ import {
 } from "@/lib/studio/workflow-builder";
 
 export const dynamic = "force-dynamic";
-/** H3-Lite: create jest szybki; after() odpytuje MiniMax jeszcze kilka minut. */
+/** MiniMax: create jest szybki; after() odpytuje jeszcze kilka minut. */
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
       {
         ok: false,
         error: cloudVideo
-          ? "H3-Lite wymaga obrazu startowego (image-to-video)."
+          ? "MiniMax wymaga obrazu startowego (image-to-video)."
           : "Workflow wideo wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
       },
       { status: 400 }
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
 
   if (cloudVideo) {
     try {
-      const started = await startH3LiteVideo(parsed.data);
+      const started = await startMinimaxVideo(parsed.data);
       after(async () => {
         await pollMinimaxUntilSaved(started.taskId);
       });
@@ -92,13 +92,13 @@ export async function POST(request: Request) {
         modelNegative: started.modelNegative,
         promptBoost: started.promptBoost,
         videoPlan: planVideo({
-          videoEngine: "h3-lite",
+          videoEngine: started.engine,
           durationSec: started.durationSec,
         }),
       });
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "MiniMax-H3-Lite nieudane";
+        err instanceof Error ? err.message : "MiniMax nieudane";
       const status =
         err instanceof MinimaxConfigError
           ? 503

@@ -21,7 +21,7 @@ export function outputGalleryRoot(): string | null {
 
 export function cloudClipFilename(taskId: string): string {
   const safe = taskId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 80);
-  return `h3-lite-${safe || "clip"}.mp4`;
+  return `minimax-${safe || "clip"}.mp4`;
 }
 
 export function cloudClipRelativePath(taskId: string): string {

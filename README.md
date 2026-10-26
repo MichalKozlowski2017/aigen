@@ -60,7 +60,7 @@ Szczegóły lokalnego ComfyUI: [docs/studio-setup.md](docs/studio-setup.md).
 | `COMFYUI_MODELS_DIR` | **Tylko lokalny panel** — skan dysku + przycisk Pobierz |
 | `COMFYUI_OUTPUT_DIR` | **Tylko lokalny panel** — skan galerii z dysku; na Vercel: `/history` + indeks w Comfy input |
 | `STUDIO_PASSWORD` | Opcjonalne hasło; chroni panel i `/api/*` |
-| `MINIMAX_API_KEY` | Klucz **pay-as-you-go** MiniMax dla silnika **MiniMax-H3-Lite** (768P, obraz → wideo). Nie klucz subskrypcji i nie pakiet Hailuo. Bez tej zmiennej H3-Lite nie startuje; Wan / LTX / SVD jej nie używają. |
+| `MINIMAX_API_KEY` | Klucz **pay-as-you-go** MiniMax dla silników H3 (H3, Highspeed, Lite, Max — każda rozdzielczość osobno). Nie klucz subskrypcji i nie pakiet Hailuo. Bez tej zmiennej MiniMax nie startuje; Wan / LTX / SVD jej nie używają. |
 | `PIPELINE_LEGION_WORKER` | **Zostaw wyłączone.** Eksperymentalne; nie włączać domyślnie (register bez osobnego auth). Opcjonalny `aigen-queue-worker.py` na Legionie jest osobny i nie wymaga tej flagi. |
 
 ## Skrypty

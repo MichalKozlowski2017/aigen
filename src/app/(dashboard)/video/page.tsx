@@ -49,7 +49,7 @@ export default async function StudioVideoPage() {
           className="text-3xl font-semibold tracking-tight text-stone-50 sm:text-4xl"
           style={{ fontFamily: "var(--font-studio-display), system-ui" }}
         >
-          Obraz → wideo (Wan / LTX / SVD / H3-Lite)
+          Obraz → wideo (Wan / LTX / SVD / MiniMax)
         </h1>
         <p className="max-w-2xl text-stone-400">
           Domyślnie{" "}
@@ -69,8 +69,10 @@ export default async function StudioVideoPage() {
             Auto / Pion / Poziom
           </strong>
           . Quality 720p = wolne (~40+ min/chunk).{" "}
-          <strong className="font-medium text-stone-300">H3-Lite</strong> to
-          chmurowy MiniMax-H3-Lite 768P (pay-as-you-go) i nie czeka na Comfy.
+          <strong className="font-medium text-stone-300">MiniMax</strong> to
+          chmurowe H3, H3-Highspeed, H3-Lite i H3-Max (pay-as-you-go, własna
+          rozdzielczość przy każdej opcji). H3-Lite 768P zostaje. Comfy nie jest
+          wymagane.
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}
@@ -99,7 +101,7 @@ export default async function StudioVideoPage() {
           ...checkpoints,
         ]}
         kind="video"
-        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s · H3-Lite ${H3_LITE_UI_LIMITS.minDurationSec}–${H3_LITE_UI_LIMITS.maxDurationSec}s @ 768P`}
+        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s · MiniMax ${H3_LITE_UI_LIMITS.minDurationSec}–${H3_LITE_UI_LIMITS.maxDurationSec}s (H3-Max od 5 s) · 480P / 768P / 2K`}
         comfyUrl={comfyUrl}
         minimaxConfigured={minimaxApiKeyConfigured}
       />

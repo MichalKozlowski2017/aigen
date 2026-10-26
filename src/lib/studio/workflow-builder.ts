@@ -22,9 +22,12 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   WAN_UI_LIMITS,
-  H3_LITE_UI_LIMITS,
-  clampH3LiteDuration,
+  clampMinimaxDuration,
   effectiveDurationSec,
+  getMinimaxEngine,
+  isMinimaxVideoEngine,
+  isVideoEngine,
+  minimaxUiLimits,
   maxLtxDurationAtFps,
   maxWanDurationAtFps,
   preferredWanChunkLength,
@@ -83,6 +86,13 @@ export {
   H3_LITE_USD_PER_SEC,
   MINIMAX_API_KEY_ENV,
   MINIMAX_H3_LITE_MODEL,
+  MINIMAX_VIDEO_ENGINES,
+  clampMinimaxDuration,
+  formatUsdPerSec,
+  getMinimaxEngine,
+  isMinimaxVideoEngine,
+  minimaxEstimatedUsd,
+  minimaxUiLimits,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
   clampH3LiteDuration,
@@ -216,9 +226,9 @@ export async function buildWorkflow(
 ): Promise<BuildWorkflowResult> {
   if (body.kind === "video") {
     const engine = resolveVideoEngine(body);
-    if (engine === "h3-lite") {
+    if (isMinimaxVideoEngine(engine)) {
       throw new Error(
-        "MiniMax-H3-Lite idzie przez API pay-as-you-go, nie przez workflow ComfyUI."
+        "MiniMax idzie przez API pay-as-you-go, nie przez workflow ComfyUI."
       );
     }
     if (engine === "wan") {
@@ -261,12 +271,7 @@ export function resolveVideoEngine(body: {
   videoEngine?: string;
   model?: string;
 }): VideoEngineId {
-  if (
-    body.videoEngine === "h3-lite" ||
-    body.videoEngine === "svd" ||
-    body.videoEngine === "ltx" ||
-    body.videoEngine === "wan"
-  ) {
+  if (isVideoEngine(body.videoEngine)) {
     return body.videoEngine;
   }
   const m = body.model?.toLowerCase() ?? "";
@@ -385,31 +390,47 @@ export function planVideo(body: {
   maxPerChunk?: number;
 }): VideoPlan {
   const engine = resolveVideoEngine(body);
-  if (engine === "h3-lite") return planH3LiteVideo(body);
+  if (isMinimaxVideoEngine(engine)) {
+    return planMinimaxVideo({ ...body, videoEngine: engine });
+  }
   if (engine === "wan") return planWanVideo(body);
   if (engine === "ltx") return planLtxVideo(body);
   return planSvdVideo(body);
 }
 
-/** Jedno wywołanie MiniMax-H3-Lite. Bez chunków, RIFE i upscale. */
-export function planH3LiteVideo(body: { durationSec?: number }): VideoPlan {
-  const requested = body.durationSec ?? H3_LITE_UI_LIMITS.defaultDurationSec;
-  const durationSec = clampH3LiteDuration(
+/** Jedno wywołanie MiniMax (model + rozdzielczość). Bez chunków, RIFE i upscale. */
+export function planMinimaxVideo(body: {
+  videoEngine?: string;
+  durationSec?: number;
+}): VideoPlan {
+  const engine = isMinimaxVideoEngine(body.videoEngine)
+    ? body.videoEngine
+    : "h3-lite";
+  const spec = getMinimaxEngine(engine);
+  const requested = body.durationSec ?? spec.defaultDurationSec;
+  const durationSec = clampMinimaxDuration(
+    engine,
     typeof requested === "number" ? requested : undefined
   );
-  const fps = H3_LITE_UI_LIMITS.defaultFps;
+  const limits = minimaxUiLimits(engine);
+  const fps = limits.defaultFps;
   return {
-    engine: "h3-lite",
-    width: H3_LITE_UI_LIMITS.defaultWidth,
-    height: H3_LITE_UI_LIMITS.defaultHeight,
+    engine,
+    width: limits.defaultWidth,
+    height: limits.defaultHeight,
     fps,
     durationSec,
     effectiveDurationSec: durationSec,
     frames: durationSec * fps,
     durationClamped: Math.abs(requested - durationSec) > 0.05,
-    maxDurationAtFps: H3_LITE_UI_LIMITS.maxDurationSec,
+    maxDurationAtFps: spec.maxDurationSec,
     vramRisky: false,
   };
+}
+
+/** Jedno wywołanie MiniMax-H3-Lite 768P. Bez chunków, RIFE i upscale. */
+export function planH3LiteVideo(body: { durationSec?: number }): VideoPlan {
+  return planMinimaxVideo({ videoEngine: "h3-lite", durationSec: body.durationSec });
 }
 
 export function planSvdVideo(body: {
