@@ -1,19 +1,23 @@
 import Link from "next/link";
+import { EngineSwitch } from "@/components/studio/engine-switch";
 import { HealthPanel } from "@/components/studio/health-panel";
 import { checkComfyHealth } from "@/lib/studio/comfy-client";
 import { getStudioPublicConfigAsync } from "@/lib/studio/config";
+import { getEngineSwitchView } from "@/lib/studio/engine-switch";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioDashboardPage() {
-  const [health, config] = await Promise.all([
+  const [health, config, engine] = await Promise.all([
     checkComfyHealth(),
     getStudioPublicConfigAsync(),
+    getEngineSwitchView(),
   ]);
 
   return (
     <div className="space-y-12">
       <HealthPanel health={health} />
+      <EngineSwitch initial={engine} />
 
       <section className="studio-fade-in-delayed grid gap-6 sm:grid-cols-3">
         <DashLink

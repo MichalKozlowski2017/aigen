@@ -59,6 +59,32 @@ Invoke-WebRequest -Uri "https://comfy.your-domain.com/system_stats" -UseBasicPar
 
 Oczekiwane: HTTP 200 + JSON Comfy.
 
+## 4b. Sterowanie GPU (osobny hostname)
+
+Przełącznik ComfyUI ↔ Qwen **nie** idzie tym samym ingressem. Port 8188 to API Comfy; `STUDIO_PASSWORD` go nie chroni, a po zatrzymaniu Comfy tunel na 8188 i tak nic nie przeniesie.
+
+Endpoint: `scripts/legion/engine-control.py` na `127.0.0.1:8199` (zostaje, gdy Comfy jest wyłączone). Auth: `Authorization: Bearer <LEGION_ENGINE_SECRET>` — bez sekretu proces nie nasłuchuje.
+
+Nad regułą `http_status:404` dopisz:
+
+```yaml
+  - hostname: engine.your-domain.com
+    service: http://127.0.0.1:8199
+```
+
+DNS: `cloudflared tunnel route dns comfyui-legion engine.your-domain.com`.
+
+Na Vercel (raz):
+
+| Zmienna | Wartość |
+|---------|---------|
+| `LEGION_ENGINE_URL` | `https://engine.your-domain.com` |
+| `LEGION_ENGINE_SECRET` | ten sam sekret co na Legionie |
+
+Bez `LEGION_ENGINE_URL` panel pokazuje przełącznik jako niedostępny i **nie** woła Legionu. Sekretu nie wkładaj do URL.
+
+Na Legionie: `LEGION_ENGINE_SECRET` oraz opcjonalnie `QWEN_CODER_START_SCRIPT` (domyślnie `C:\Users\mkozl\Models\start-qwen-coder.ps1`). Start: `start-engine-control.ps1` (także z `start-comfy-stack.ps1`, gdy sekret jest ustawiony).
+
 ## 5. Autostart stack (Legion)
 
 Skrypty w repo: [`scripts/legion/`](../scripts/legion/README.md).
@@ -150,6 +176,8 @@ Wymaga `VERCEL_TOKEN` + `VERCEL_PROJECT_ID` (+ opcjonalnie `VERCEL_TEAM_ID`). Ak
 | 502 / 1033 | Ingress wskazuje `http://127.0.0.1:8188`? Comfy słucha? |
 | Stary Quick host w Vercel | `publish-comfy-url.ps1` albo Named URL + redeploy |
 | Auto-publish 401 | Ten sam `COMFY_URL_UPDATE_SECRET` na Legionie i Vercel? |
+| Przełącznik GPU niedostępny | Brak `LEGION_ENGINE_URL` na Vercel. To nie jest `COMFYUI_URL`. |
+| Przełącznik 401 | Ten sam `LEGION_ENGINE_SECRET` na Legionie i w panelu? Endpoint nie używa `STUDIO_PASSWORD`. |
 | Auto-publish 503 | Sekret nieustawiony na Vercel — dodaj i redeploy |
 | Override ginie po cold start | Włącz Vercel KV (`KV_REST_API_*`) albo `-UpdateVercelEnv` |
 | Galeria pusta po reboocie Comfy | Indeks `input/aigen-gallery-index.json` — patrz `scripts/legion/README.md` |

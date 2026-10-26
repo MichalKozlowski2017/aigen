@@ -12,6 +12,7 @@ export * from "./gallery-index";
 export * from "./models";
 export * from "./downloads";
 export * from "./prompt-boost";
+export * from "./engine-switch";
 export {
   VIDEO_UI_LIMITS,
   LTX_UI_LIMITS,

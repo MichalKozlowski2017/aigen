@@ -1,10 +1,16 @@
 import { FreeModelsButton } from "@/components/studio/free-models-button";
-import { getStudioPublicConfigAsync } from "@/lib/studio/config";
+import {
+  getLegionEngineSecret,
+  getLegionEngineUrl,
+  getStudioPublicConfigAsync,
+} from "@/lib/studio/config";
 
 export const dynamic = "force-dynamic";
 
 export default async function StudioSettingsPage() {
   const config = await getStudioPublicConfigAsync();
+  const engineUrl = getLegionEngineUrl();
+  const engineSecret = Boolean(getLegionEngineSecret());
 
   const modelsDirValue = config.modelsDir
     ? config.modelsDir
@@ -42,6 +48,18 @@ export default async function StudioSettingsPage() {
       value: config.defaultImageModel,
     },
     { label: "Checkpoint SDXL (opcja)", value: config.defaultCheckpoint },
+    {
+      label: "LEGION_ENGINE_URL",
+      value: engineUrl
+        ? engineUrl
+        : "(nie ustawiono — przełącznik GPU niedostępny)",
+    },
+    {
+      label: "LEGION_ENGINE_SECRET",
+      value: engineSecret
+        ? "ustawione (ukryte)"
+        : "brak — panel nie wywołuje sterowania",
+    },
   ];
 
   return (

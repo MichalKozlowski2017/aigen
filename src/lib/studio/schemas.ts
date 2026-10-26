@@ -96,6 +96,12 @@ export const downloadBodySchema = z.object({
   modelId: z.string().min(1).max(120),
 });
 
+/** Panel → Legion engine-control. Sekret idzie z env serwera, nie z body. */
+export const engineSwitchBodySchema = z.object({
+  target: z.enum(["comfy", "coder"]),
+  confirmActiveJob: z.boolean().optional().default(false),
+});
+
 export const galleryQuerySchema = z.object({
   kind: z.enum(["all", "image", "video"]).optional().default("all"),
   limit: z.coerce.number().int().min(1).max(120).optional().default(60),
