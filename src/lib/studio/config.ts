@@ -86,6 +86,9 @@ function buildPublicConfig(comfyUrl: string): StudioPublicConfig {
     modelsDir,
     outputDir,
     passwordRequired: Boolean(getStudioPassword()),
+    minimaxApiKeyConfigured: Boolean(
+      trimOrUndefined(process.env.MINIMAX_API_KEY)
+    ),
     defaultCheckpoint: getDefaultCheckpoint(),
     defaultImageModel: getDefaultImageModel(),
   };

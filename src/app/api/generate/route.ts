@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { checkComfyHealth, enqueuePrompt } from "@/lib/studio/comfy-client";
 import {
@@ -6,11 +6,23 @@ import {
   formatFriendlyErrorLines,
 } from "@/lib/studio/comfy-errors";
 import { ensureStartImageInComfyInput } from "@/lib/studio/ensure-start-image";
+import {
+  MinimaxConfigError,
+  MinimaxRequestError,
+  pollMinimaxUntilSaved,
+  startH3LiteVideo,
+} from "@/lib/studio/minimax-video";
 import { preparePromptForModel } from "@/lib/studio/prompt-boost";
 import { generateBodySchema } from "@/lib/studio/schemas";
-import { buildWorkflow, planVideo } from "@/lib/studio/workflow-builder";
+import {
+  buildWorkflow,
+  planVideo,
+  videoEngineSkipsComfyHealth,
+} from "@/lib/studio/workflow-builder";
 
 export const dynamic = "force-dynamic";
+/** H3-Lite: create jest szybki; after() odpytuje MiniMax jeszcze kilka minut. */
+export const maxDuration = 300;
 
 export async function POST(request: Request) {
   const denied = await requireStudioApiAuth();
@@ -25,28 +37,76 @@ export async function POST(request: Request) {
     );
   }
 
-  const health = await checkComfyHealth();
-  if (!health.online) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          "ComfyUI jest offline. Uruchom silnik lokalnie i sprawdź COMFYUI_URL.",
-        health,
-      },
-      { status: 503 }
-    );
+  const cloudVideo =
+    parsed.data.kind === "video" &&
+    videoEngineSkipsComfyHealth(parsed.data.videoEngine);
+
+  if (!cloudVideo) {
+    const health = await checkComfyHealth();
+    if (!health.online) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "ComfyUI jest offline. Uruchom silnik lokalnie i sprawdź COMFYUI_URL.",
+          health,
+        },
+        { status: 503 }
+      );
+    }
   }
 
-  if (parsed.data.kind === "video" && !parsed.data.startImage?.trim()) {
+  if (
+    parsed.data.kind === "video" &&
+    !parsed.data.startImage?.trim() &&
+    !parsed.data.startImageDataUrl?.trim()
+  ) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Workflow wideo wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
+        error: cloudVideo
+          ? "H3-Lite wymaga obrazu startowego (image-to-video)."
+          : "Workflow wideo wymaga obrazu startowego — wgraj plik powyżej promptu albo podaj nazwę w Comfy input.",
       },
       { status: 400 }
     );
+  }
+
+  if (cloudVideo) {
+    try {
+      const started = await startH3LiteVideo(parsed.data);
+      after(async () => {
+        await pollMinimaxUntilSaved(started.taskId);
+      });
+      return NextResponse.json({
+        ok: true,
+        promptId: started.promptId,
+        template: started.template,
+        engine: started.engine,
+        kind: started.kind,
+        model: started.model,
+        resolution: started.resolution,
+        durationSec: started.durationSec,
+        estimatedUsd: started.estimatedUsd,
+        modelPrompt: started.modelPrompt,
+        modelNegative: started.modelNegative,
+        promptBoost: started.promptBoost,
+        videoPlan: planVideo({
+          videoEngine: "h3-lite",
+          durationSec: started.durationSec,
+        }),
+      });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "MiniMax-H3-Lite nieudane";
+      const status =
+        err instanceof MinimaxConfigError
+          ? 503
+          : err instanceof MinimaxRequestError
+            ? 502
+            : 500;
+      return NextResponse.json({ ok: false, error: message }, { status });
+    }
   }
 
   try {

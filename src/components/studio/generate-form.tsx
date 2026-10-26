@@ -30,9 +30,14 @@ import {
 import type { GalleryItem } from "@/lib/studio/types";
 import {
   DEFAULT_VIDEO_ENGINE,
+  H3_LITE_UI_LIMITS,
   LTX_UI_LIMITS,
+  MINIMAX_API_KEY_ENV,
+  MINIMAX_H3_LITE_MODEL,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  clampH3LiteDuration,
+  h3LiteEstimatedUsd,
   DEFAULT_WAN_FAST_STEPS,
   DEFAULT_WAN_QUALITY_PRESET,
   VIDEO_ORIENTATION_LAST_KEY,
@@ -50,6 +55,7 @@ import {
   isChunkedVideoEngine,
   parseVideoOrientationMode,
   parseVideoOrientationResolved,
+  planH3LiteVideo,
   planLtxVideo,
   planSvdVideo,
   planWanVideo,
@@ -83,6 +89,17 @@ import {
   useComfyWsProgress,
 } from "@/components/studio/use-comfy-ws-progress";
 
+async function fileToDataUrl(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const stride = 0x8000;
+  for (let i = 0; i < bytes.length; i += stride) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + stride));
+  }
+  const mime = file.type === "image/jpg" ? "image/jpeg" : file.type || "image/jpeg";
+  return `data:${mime};base64,${btoa(binary)}`;
+}
+
 function readStoredOrientation(): {
   mode: VideoOrientationMode;
   lastExplicit: VideoOrientationResolved | null;
@@ -108,6 +125,8 @@ type JobOutput = {
   filename: string;
   subfolder: string;
   type: string;
+  /** Dysk galerii (H3-Lite). Bez tego podgląd idzie przez Comfy /view. */
+  url?: string;
 };
 
 /** Wan chunk ~15–20+ min; 2 chunki + stitch → długi deadline. */
@@ -142,6 +161,8 @@ type Props = {
   imageLimitsNote?: string;
   /** Publiczny COMFYUI_URL — live WS progress (sampling i/N). */
   comfyUrl?: string | null;
+  /** Czy serwer ma MINIMAX_API_KEY. Samej wartości nie dostajemy. */
+  minimaxConfigured?: boolean;
 };
 
 export function GenerateForm({
@@ -152,6 +173,7 @@ export function GenerateForm({
   videoLimitsNote,
   imageLimitsNote,
   comfyUrl = null,
+  minimaxConfigured = false,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(defaultModel);
@@ -193,7 +215,9 @@ export function GenerateForm({
       ? WAN_UI_LIMITS
       : videoEngine === "ltx"
         ? LTX_UI_LIMITS
-        : SVD_UI_LIMITS;
+        : videoEngine === "h3-lite"
+          ? H3_LITE_UI_LIMITS
+          : SVD_UI_LIMITS;
   const [width, setWidth] = useState<number>(() => {
     if (kind !== "video") return getImageFormatPreset("square").width;
     const stored = readStoredOrientation();
@@ -223,6 +247,10 @@ export function GenerateForm({
     kind === "video" ? WAN_UI_LIMITS.defaultFps : 6
   );
   const [startImage, setStartImage] = useState("");
+  const [startImageDataUrl, setStartImageDataUrl] = useState<string | null>(
+    null
+  );
+  const startFileRef = useRef<File | null>(null);
   const [startImageSource, setStartImageSource] =
     useState<StartImageSource | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -288,6 +316,7 @@ export function GenerateForm({
 
   const wsEnabled = Boolean(
     promptId &&
+      !promptId.startsWith("minimax:") &&
       status &&
       status !== "completed" &&
       status !== "failed"
@@ -385,7 +414,9 @@ export function GenerateForm({
           )
         : videoEngine === "ltx"
           ? planLtxVideo({ width, height, fps, durationSec })
-          : planSvdVideo({ width, height, fps, durationSec })
+          : videoEngine === "h3-lite"
+            ? planH3LiteVideo({ durationSec })
+            : planSvdVideo({ width, height, fps, durationSec })
       : null;
   const videoRisky = Boolean(videoPlan?.vramRisky);
   const durationInputMax = videoLimits.maxDurationSec;
@@ -474,6 +505,15 @@ export function GenerateForm({
       if (!model.toLowerCase().includes("ltx")) {
         setModel(DEFAULT_LTX_CHECKPOINT);
       }
+    } else if (next === "h3-lite") {
+      setDurationSec(H3_LITE_UI_LIMITS.defaultDurationSec);
+      setFps(H3_LITE_UI_LIMITS.defaultFps);
+      setPostRife(false);
+      setPostUpscale(false);
+      setFaceRestore(false);
+      if (startFileRef.current) {
+        void uploadStartFile(startFileRef.current, startImageDims, "local");
+      }
     } else {
       setWidth(SVD_UI_LIMITS.defaultWidth);
       setHeight(SVD_UI_LIMITS.defaultHeight);
@@ -485,6 +525,9 @@ export function GenerateForm({
         checkpoints.find((c) => c.toLowerCase().includes("svd")) ??
         "svd_xt.safetensors";
       setModel(svd);
+    }
+    if (next !== "h3-lite" && startFileRef.current && !startImageSource) {
+      void uploadStartFile(startFileRef.current, startImageDims, "comfy");
     }
   }
 
@@ -816,13 +859,44 @@ export function GenerateForm({
 
   async function uploadStartFile(
     file: File,
-    dims?: { width: number; height: number } | null
+    dims?: { width: number; height: number } | null,
+    mode: "auto" | "local" | "comfy" = "auto"
   ) {
+    const local =
+      mode === "local" || (mode === "auto" && videoEngine === "h3-lite");
     setError(null);
     setErrorDetail(null);
     setUploadBusy(true);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(URL.createObjectURL(file));
+    if (local) {
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        if (dataUrl.length > 7_500_000) {
+          setError(
+            "Obraz jest za duży na żądanie H3-Lite. Wybierz mniejsze zdjęcie."
+          );
+          setStartImage("");
+          setStartImageDataUrl(null);
+          setStartImageSource(null);
+          return;
+        }
+        setStartImageDataUrl(dataUrl);
+        setStartImage(file.name || "start.jpg");
+        setStartImageSource(null);
+        if (dims && dims.width > 0 && dims.height > 0) {
+          setStartImageDims(dims);
+        }
+      } catch {
+        setError("Nie udało się odczytać obrazu startowego.");
+        setStartImage("");
+        setStartImageDataUrl(null);
+        setStartImageSource(null);
+      } finally {
+        setUploadBusy(false);
+      }
+      return;
+    }
     try {
       const body = new FormData();
       body.append("image", file);
@@ -836,6 +910,7 @@ export function GenerateForm({
       }
       // Basename z Comfy /upload/image (input) — ta sama nazwa idzie do LoadImage
       setStartImage(data.startImage as string);
+      setStartImageDataUrl(null);
       setStartImageSource({
         filename: (data.name as string) || (data.startImage as string),
         subfolder: "",
@@ -872,6 +947,7 @@ export function GenerateForm({
     try {
       // Client: bake EXIF + JPEG + max edge; HEIC try-decode; ProRAW → jasny błąd PL
       const normalized = await normalizeImageForUpload(file);
+      startFileRef.current = normalized.file;
       await uploadStartFile(normalized.file, {
         width: normalized.width,
         height: normalized.height,
@@ -905,7 +981,7 @@ export function GenerateForm({
         type: blob.type || item.mime || "image/png",
       });
       const normalized = await normalizeImageForUpload(raw);
-      // Re-upload do Comfy input — uploadStartFile ustawia source=input + basename
+      startFileRef.current = normalized.file;
       await uploadStartFile(normalized.file, {
         width: normalized.width,
         height: normalized.height,
@@ -1005,8 +1081,16 @@ export function GenerateForm({
     setChunkInfo(null);
     setStartedAtMs(Date.now());
 
-    if (kind === "video" && !startImage.trim()) {
-      setError("Dodaj obraz startowy (upload powyżej) albo wpisz nazwę pliku w Comfy input.");
+    if (
+      kind === "video" &&
+      !startImage.trim() &&
+      !(videoEngine === "h3-lite" && startImageDataUrl)
+    ) {
+      setError(
+        videoEngine === "h3-lite"
+          ? "Dodaj obraz startowy — H3-Lite jest tylko image-to-video."
+          : "Dodaj obraz startowy (upload powyżej) albo wpisz nazwę pliku w Comfy input."
+      );
       setStatus(null);
       setStartedAtMs(null);
       return;
@@ -1014,7 +1098,65 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
-        await maybeFreeOnEngineSwitch();
+        if (!(kind === "video" && videoEngine === "h3-lite")) {
+          await maybeFreeOnEngineSwitch();
+        }
+
+        if (kind === "video" && videoEngine === "h3-lite") {
+          const duration = clampH3LiteDuration(durationSec);
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              kind: "video",
+              prompt,
+              videoEngine: "h3-lite",
+              durationSec: duration,
+              startImage: startImage.trim() || "start.jpg",
+              ...(startImageDataUrl
+                ? { startImageDataUrl }
+                : {}),
+              ...(!startImageDataUrl && startImageSource
+                ? { startImageSource }
+                : {}),
+            }),
+          });
+          const data = await res.json();
+          if (!data.ok) {
+            applyGenerateError(data);
+            return;
+          }
+          if (typeof data.modelPrompt === "string" && data.modelPrompt) {
+            setModelPromptPreview(data.modelPrompt);
+            setBoostOpen(true);
+          }
+          if (data.promptBoost?.warnings?.length) {
+            setBoostWarnings(data.promptBoost.warnings);
+          }
+          setPromptId(data.promptId);
+          writeLastEngineFamily(kind);
+          setStatus("queued");
+          setJobProgress({
+            percent: 12,
+            stage: "queued",
+            step: null,
+            stepMax: null,
+            phase: "Zadanie MiniMax-H3-Lite wysłane — odpytuję do gotowego MP4",
+            queuePending: 0,
+            queueRunning: false,
+            currentNodeId: null,
+            currentNodeType: null,
+            nodesDone: null,
+            nodesTotal: null,
+            executionStartMs: Date.now(),
+            errorMessage: null,
+            errorHint: null,
+            errorLinkHref: null,
+            errorLinkLabel: null,
+          });
+          return;
+        }
+
 
         const wanSized =
           kind === "video" && videoEngine === "wan"
@@ -1317,6 +1459,27 @@ export function GenerateForm({
                   720p = bez LoRA. 24 fps: preferuj Smooth 24 (RIFE); Native 24 =
                   experimental.
                 </p>
+              ) : videoEngine === "h3-lite" ? (
+                <p className="rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-2 text-[12px] leading-relaxed text-teal-100/85">
+                  <span className="font-medium text-teal-50">
+                    {MINIMAX_H3_LITE_MODEL}
+                  </span>{" "}
+                  · 768P · 24 fps po stronie modelu ·{" "}
+                  {H3_LITE_UI_LIMITS.minDurationSec}–
+                  {H3_LITE_UI_LIMITS.maxDurationSec} s · domyślnie{" "}
+                  {H3_LITE_UI_LIMITS.defaultDurationSec} s (~
+                  {h3LiteEstimatedUsd(H3_LITE_UI_LIMITS.defaultDurationSec).toFixed(2)}{" "}
+                  USD). Obraz startowy idzie jako pierwsza klatka. Comfy nie jest
+                  wymagane. Klucz serwera:{" "}
+                  <code className="text-teal-50">{MINIMAX_API_KEY_ENV}</code>{" "}
+                  (pay-as-you-go, nie pakiet Hailuo).
+                  {!minimaxConfigured ? (
+                    <span className="mt-1 block text-amber-100/90">
+                      Na tym serwerze nie ma {MINIMAX_API_KEY_ENV}. Ustaw zmienną
+                      w Vercel (Production i Preview) i zrób redeploy.
+                    </span>
+                  ) : null}
+                </p>
               ) : null}
             </fieldset>
 
@@ -1420,6 +1583,7 @@ export function GenerateForm({
               </fieldset>
             ) : null}
 
+            {videoEngine !== "h3-lite" ? (
             <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5">
               <input
                 type="checkbox"
@@ -1440,6 +1604,7 @@ export function GenerateForm({
                 </span>
               </span>
             </label>
+            ) : null}
 
             {videoEngine === "wan" ? (
               <>
@@ -1612,7 +1777,9 @@ export function GenerateForm({
                 <div className="min-w-0 space-y-1">
                   <p className="text-sm text-stone-200">
                     {uploadBusy
-                      ? "Wgrywam do ComfyUI…"
+                      ? videoEngine === "h3-lite"
+                        ? "Przygotowuję obraz startowy…"
+                        : "Wgrywam do ComfyUI…"
                       : startImage
                         ? `Gotowe: ${startImage}`
                         : "Upuść obraz tutaj albo kliknij, by wybrać plik"}
@@ -1677,7 +1844,9 @@ export function GenerateForm({
                 value={startImage}
                 onChange={(e) => {
                   setStartImage(e.target.value);
+                  setStartImageDataUrl(null);
                   setStartImageSource(null);
+                  startFileRef.current = null;
                 }}
                 placeholder="np. start.png"
                 className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
@@ -1736,7 +1905,8 @@ export function GenerateForm({
           ) : null}
         </div>
 
-        {(kind === "image" && !fluxSelected) || kind === "video" ? (
+        {(kind === "image" && !fluxSelected) ||
+        (kind === "video" && videoEngine !== "h3-lite") ? (
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Negatyw
@@ -1762,6 +1932,13 @@ export function GenerateForm({
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
+          {videoEngine === "h3-lite" ? (
+            <Field label="Model">
+              <p className="rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm text-stone-200">
+                {MINIMAX_H3_LITE_MODEL} · 768P
+              </p>
+            </Field>
+          ) : (
           <Field label="Model">
             <select
               value={model}
@@ -1785,6 +1962,8 @@ export function GenerateForm({
               ))}
             </select>
           </Field>
+          )}
+          {videoEngine === "h3-lite" ? null : (
           <Field label="Seed (−1 = losowy)">
             <input
               type="number"
@@ -1793,6 +1972,7 @@ export function GenerateForm({
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
             />
           </Field>
+          )}
           {kind === "image" ? (
             <fieldset className="space-y-2 sm:col-span-2">
               <legend className="text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
@@ -1828,6 +2008,8 @@ export function GenerateForm({
               </div>
             </fieldset>
           ) : null}
+          {videoEngine === "h3-lite" ? null : (
+          <>
           <Field
             label={
               wanFastLocked ? "Szerokość (Fast = 480p)" : "Szerokość"
@@ -1890,6 +2072,8 @@ export function GenerateForm({
               className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm disabled:opacity-60"
             />
           </Field>
+          </>
+          )}
           {kind === "image" ? (
             <Field label="Batch">
               <input
@@ -1904,21 +2088,40 @@ export function GenerateForm({
           ) : (
             <>
               <Field
-                label={`Czas zadany (s, max ${durationInputMax} @ ${fps} FPS)`}
+                label={
+                  videoEngine === "h3-lite"
+                    ? `Czas (s, ${H3_LITE_UI_LIMITS.minDurationSec}–${H3_LITE_UI_LIMITS.maxDurationSec})`
+                    : `Czas zadany (s, max ${durationInputMax} @ ${fps} FPS)`
+                }
               >
                 <input
                   type="number"
-                  min={1}
+                  min={
+                    videoEngine === "h3-lite"
+                      ? H3_LITE_UI_LIMITS.minDurationSec
+                      : 1
+                  }
                   max={durationInputMax}
-                  step={0.5}
+                  step={videoEngine === "h3-lite" ? 1 : 0.5}
                   value={durationSec}
                   onChange={(e) => {
                     const next = Number(e.target.value);
-                    setDurationSec(Math.min(next, durationInputMax));
+                    setDurationSec(
+                      videoEngine === "h3-lite"
+                        ? clampH3LiteDuration(next)
+                        : Math.min(next, durationInputMax)
+                    );
                   }}
                   className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
                 />
               </Field>
+              {videoEngine === "h3-lite" ? (
+                <p className="text-[11px] text-stone-500 sm:col-span-2">
+                  Szacunek ~{h3LiteEstimatedUsd(durationSec).toFixed(2)} USD
+                  (0,04 USD/s, 768P). Negatyw, steps, CFG, RIFE i upscale nie
+                  idą do API.
+                </p>
+              ) : null}
               {videoEngine === "wan" ? (
                 <Field label="FPS (16 | 24)">
                   <select
@@ -1936,7 +2139,7 @@ export function GenerateForm({
                     ))}
                   </select>
                 </Field>
-              ) : (
+              ) : videoEngine === "h3-lite" ? null : (
                 <Field label={`FPS (max ${videoLimits.maxFps})`}>
                   <input
                     type="number"
@@ -1984,6 +2187,17 @@ export function GenerateForm({
 
         {kind === "video" && videoPlan ? (
           <div className="space-y-1.5 text-sm">
+            {videoEngine === "h3-lite" ? (
+              <p className="text-stone-200">
+                Jedno wywołanie{" "}
+                <span className="font-mono text-teal-100">
+                  {videoPlan.effectiveDurationSec}s
+                </span>{" "}
+                · {MINIMAX_H3_LITE_MODEL} · 768P · ~
+                {h3LiteEstimatedUsd(videoPlan.effectiveDurationSec).toFixed(2)} USD.
+                Obraz wyznacza kadr. MP4 jest ściągany do galerii, zanim link wygaśnie.
+              </p>
+            ) : (
             <p className="text-stone-200">
               Wyjdzie{" "}
               <span className="font-mono text-teal-100">
@@ -2011,7 +2225,8 @@ export function GenerateForm({
                 </span>
               ) : null}
             </p>
-            {videoPlan.durationClamped ? (
+            )}
+            {videoPlan.durationClamped && videoEngine !== "h3-lite" ? (
               <p className="text-amber-200/85">
                 Zadany czas przekracza max{" "}
                 {isChunkedVideoEngine(videoEngine)
@@ -2037,13 +2252,24 @@ export function GenerateForm({
               <p className="text-stone-500">{videoLimitsNote}</p>
             ) : null}
             <p className="text-stone-500">
-              Start frame w Comfy <code className="text-stone-400">input</code> —
-              upload / „Z galerii”.{" "}
-              {videoEngine === "wan"
-                ? WAN_UI_LIMITS.note
-                : videoEngine === "ltx"
-                  ? LTX_UI_LIMITS.note
-                  : SVD_UI_LIMITS.note}
+              {videoEngine === "h3-lite" ? (
+                <>
+                  Obraz startowy jest pierwszą klatką (pole{" "}
+                  <code className="text-stone-400">image_url</code> /{" "}
+                  <code className="text-stone-400">first_frame</code>
+                  ). {H3_LITE_UI_LIMITS.note}
+                </>
+              ) : (
+                <>
+                  Start frame w Comfy <code className="text-stone-400">input</code>{" "}
+                  — upload / „Z galerii”.{" "}
+                  {videoEngine === "wan"
+                    ? WAN_UI_LIMITS.note
+                    : videoEngine === "ltx"
+                      ? LTX_UI_LIMITS.note
+                      : SVD_UI_LIMITS.note}
+                </>
+              )}
             </p>
             {videoRisky ? (
               <p className="text-amber-200/85">
@@ -2166,7 +2392,9 @@ export function GenerateForm({
             />
           ) : (
             <p className="text-sm text-stone-500">
-              Wynik pojawi się tutaj po zakończeniu joba w ComfyUI.
+              {videoEngine === "h3-lite"
+                ? "Wynik H3-Lite pojawi się tutaj. Klip jest zapisywany w galerii, nie jako sam zdalny link."
+                : "Wynik pojawi się tutaj po zakończeniu joba w ComfyUI."}
             </p>
           )}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -2176,7 +2404,7 @@ export function GenerateForm({
                 subfolder: o.subfolder || "",
                 type: o.type || "output",
               });
-              const src = `/api/comfy-view?${q.toString()}`;
+              const src = o.url || `/api/comfy-view?${q.toString()}`;
               const isVideo = /\.(mp4|webm|mov)$/i.test(o.filename);
               return (
                 <div
@@ -2209,8 +2437,9 @@ export function GenerateForm({
           {status === "completed" && outputs.length > 0 ? (
             <div className="mt-4 space-y-2 rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-3">
               <p className="text-sm text-teal-100/90">
-                Zapisane w output ComfyUI — widać je w Galerii (historia / katalog
-                output).
+                {videoEngine === "h3-lite"
+                  ? "MP4 jest w galerii (ściągnięty, zanim link MiniMax wygaśnie)."
+                  : "Zapisane w output ComfyUI — widać je w Galerii (historia / katalog output)."}
               </p>
               <Link
                 href="/gallery"

@@ -38,6 +38,12 @@ export default async function StudioSettingsPage() {
         : "wyłączone — otwarty dostęp",
     },
     {
+      label: "MINIMAX_API_KEY",
+      value: config.minimaxApiKeyConfigured
+        ? "ustawione (ukryte) — MiniMax-H3-Lite, pay-as-you-go"
+        : "brak — H3-Lite nie wystartuje",
+    },
+    {
       label: "Domyślny model obrazu",
       value: config.defaultImageModel,
     },

@@ -8,6 +8,7 @@ import {
   DEFAULT_LTX_CHECKPOINT,
   DEFAULT_VIDEO_ENGINE,
   DEFAULT_WAN_UNET,
+  H3_LITE_UI_LIMITS,
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   WAN_UI_LIMITS,
@@ -20,7 +21,8 @@ export default async function StudioVideoPage() {
     listInstalledCheckpoints(),
     listInstalledDiffusionModels(),
   ]);
-  const { comfyUrl } = await getStudioPublicConfigAsync();
+  const { comfyUrl, minimaxApiKeyConfigured } =
+    await getStudioPublicConfigAsync();
   const hasWan = diffusionModels.some((c) => c.toLowerCase().includes("wan"));
   const hasLtx = checkpoints.some((c) => c.toLowerCase().includes("ltx"));
   const hasSvd = checkpoints.some((c) => c.toLowerCase().includes("svd"));
@@ -47,7 +49,7 @@ export default async function StudioVideoPage() {
           className="text-3xl font-semibold tracking-tight text-stone-50 sm:text-4xl"
           style={{ fontFamily: "var(--font-studio-display), system-ui" }}
         >
-          Obraz → wideo (Wan / LTX / SVD)
+          Obraz → wideo (Wan / LTX / SVD / H3-Lite)
         </h1>
         <p className="max-w-2xl text-stone-400">
           Domyślnie{" "}
@@ -66,7 +68,9 @@ export default async function StudioVideoPage() {
           <strong className="font-medium text-stone-300">
             Auto / Pion / Poziom
           </strong>
-          . Quality 720p = wolne (~40+ min/chunk).
+          . Quality 720p = wolne (~40+ min/chunk).{" "}
+          <strong className="font-medium text-stone-300">H3-Lite</strong> to
+          chmurowy MiniMax-H3-Lite 768P (pay-as-you-go) i nie czeka na Comfy.
           {!hasWan ? (
             <span className="text-amber-200/80">
               {" "}
@@ -95,8 +99,9 @@ export default async function StudioVideoPage() {
           ...checkpoints,
         ]}
         kind="video"
-        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s`}
+        videoLimitsNote={`Wan max ${WAN_UI_LIMITS.maxDurationSec}s / ${WAN_UI_LIMITS.maxWidth}×${WAN_UI_LIMITS.maxHeight} @ 16|24 FPS (SAFE ${WAN_UI_LIMITS.maxLength}) · LTX max ${LTX_UI_LIMITS.maxWidth}×${LTX_UI_LIMITS.maxHeight} · SVD max ${SVD_UI_LIMITS.maxDurationSec}s · H3-Lite ${H3_LITE_UI_LIMITS.minDurationSec}–${H3_LITE_UI_LIMITS.maxDurationSec}s @ 768P`}
         comfyUrl={comfyUrl}
+        minimaxConfigured={minimaxApiKeyConfigured}
       />
     </div>
   );

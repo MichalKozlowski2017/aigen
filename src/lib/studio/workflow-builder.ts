@@ -22,6 +22,8 @@ import {
   LTX_UI_LIMITS,
   SVD_UI_LIMITS,
   WAN_UI_LIMITS,
+  H3_LITE_UI_LIMITS,
+  clampH3LiteDuration,
   effectiveDurationSec,
   maxLtxDurationAtFps,
   maxWanDurationAtFps,
@@ -77,8 +79,15 @@ export {
   WAN_CHUNK_PREFERRED_FAST,
   WAN_CHUNK_LENGTH_OPTIONS,
   LTX_UI_LIMITS,
+  H3_LITE_UI_LIMITS,
+  H3_LITE_USD_PER_SEC,
+  MINIMAX_API_KEY_ENV,
+  MINIMAX_H3_LITE_MODEL,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
+  clampH3LiteDuration,
+  h3LiteEstimatedUsd,
+  videoEngineSkipsComfyHealth,
   snapWanLength,
   snapWanFps,
   snapLtxLength,
@@ -207,6 +216,11 @@ export async function buildWorkflow(
 ): Promise<BuildWorkflowResult> {
   if (body.kind === "video") {
     const engine = resolveVideoEngine(body);
+    if (engine === "h3-lite") {
+      throw new Error(
+        "MiniMax-H3-Lite idzie przez API pay-as-you-go, nie przez workflow ComfyUI."
+      );
+    }
     if (engine === "wan") {
       const { workflow, warnings } = await buildWanVideoWorkflow(body);
       return {
@@ -248,6 +262,7 @@ export function resolveVideoEngine(body: {
   model?: string;
 }): VideoEngineId {
   if (
+    body.videoEngine === "h3-lite" ||
     body.videoEngine === "svd" ||
     body.videoEngine === "ltx" ||
     body.videoEngine === "wan"
@@ -370,9 +385,31 @@ export function planVideo(body: {
   maxPerChunk?: number;
 }): VideoPlan {
   const engine = resolveVideoEngine(body);
+  if (engine === "h3-lite") return planH3LiteVideo(body);
   if (engine === "wan") return planWanVideo(body);
   if (engine === "ltx") return planLtxVideo(body);
   return planSvdVideo(body);
+}
+
+/** Jedno wywołanie MiniMax-H3-Lite. Bez chunków, RIFE i upscale. */
+export function planH3LiteVideo(body: { durationSec?: number }): VideoPlan {
+  const requested = body.durationSec ?? H3_LITE_UI_LIMITS.defaultDurationSec;
+  const durationSec = clampH3LiteDuration(
+    typeof requested === "number" ? requested : undefined
+  );
+  const fps = H3_LITE_UI_LIMITS.defaultFps;
+  return {
+    engine: "h3-lite",
+    width: H3_LITE_UI_LIMITS.defaultWidth,
+    height: H3_LITE_UI_LIMITS.defaultHeight,
+    fps,
+    durationSec,
+    effectiveDurationSec: durationSec,
+    frames: durationSec * fps,
+    durationClamped: Math.abs(requested - durationSec) > 0.05,
+    maxDurationAtFps: H3_LITE_UI_LIMITS.maxDurationSec,
+    vramRisky: false,
+  };
 }
 
 export function planSvdVideo(body: {

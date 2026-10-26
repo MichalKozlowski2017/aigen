@@ -24,8 +24,13 @@ export const generateBodySchema = z.object({
       type: z.string().max(40).optional().default("output"),
     })
     .optional(),
-  /** Silnik wideo: wan (jakość) | ltx (draft) | svd (legacy) */
-  videoEngine: z.enum(["wan", "ltx", "svd"]).optional(),
+  /** Silnik wideo: wan | ltx | svd | h3-lite (MiniMax-H3-Lite, pay-as-you-go) */
+  videoEngine: z.enum(["wan", "ltx", "svd", "h3-lite"]).optional(),
+  /**
+   * Bajty obrazu startowego (data URI) dla H3-Lite, gdy Comfy jest offline.
+   * Nie wysyłaj tego pola dla Wan / LTX / SVD.
+   */
+  startImageDataUrl: z.string().max(8_000_000).optional(),
   /** CodeFormer (facerestore_cf) na klatkach przed VHS — per chunk */
   faceRestore: z.boolean().optional().default(false),
   /** CodeFormer fidelity 0–1 (niżej = mocniejszy restore) */
