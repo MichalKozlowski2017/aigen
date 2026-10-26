@@ -184,6 +184,10 @@ function buildRifeWorkflow(
         fast_mode: true,
         ensemble: true,
         scale_factor: 1,
+        // INPUT_TYPES defaults (Fannovel16 RIFE VFI): float32 / False / 1
+        dtype: "float32",
+        torch_compile: false,
+        batch_size: 1,
       },
     },
     "3": {
