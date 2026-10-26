@@ -1,6 +1,6 @@
 /** Silniki wideo Studio + limity pod ~16 GB VRAM (RTX 5080) + 64 GB RAM offload. */
 
-export type VideoEngineId = "wan" | "ltx" | "svd";
+export type VideoEngineId = "wan" | "ltx" | "svd" | "h3-lite";
 
 export const DEFAULT_VIDEO_ENGINE: VideoEngineId = "wan";
 
@@ -45,6 +45,12 @@ export const VIDEO_ENGINE_OPTIONS: Array<{
     id: "svd",
     label: "SVD (legacy)",
     blurb: "Krótki legacy draft — bez chunków.",
+  },
+  {
+    id: "h3-lite",
+    label: "H3-Lite (chmura)",
+    blurb:
+      "MiniMax-H3-Lite · 768P · pay-as-you-go · ~0,04 USD/s. Działa bez Comfy.",
   },
 ];
 
@@ -167,6 +173,56 @@ export const LTX_UI_LIMITS = {
   note: "LTX (draft): 1 chunk ≤121 klatek (8n+1). Powyżej — auto chunki (overlap 1) + stitch. Szybszy niż Wan, słabszy fotoreal.",
 } as const;
 
+/**
+ * MiniMax-H3-Lite image-to-video (oficjalne API pay-as-you-go).
+ * Rozdzielczość 768P, czas całkowity 4–15 s. Domyślnie 5 s ≈ 0,20 USD.
+ * Klucz: MINIMAX_API_KEY — pay-as-you-go, nie subskrypcja i nie pakiet Hailuo.
+ */
+export const MINIMAX_H3_LITE_MODEL = "MiniMax-H3-Lite";
+export const MINIMAX_API_KEY_ENV = "MINIMAX_API_KEY";
+export const H3_LITE_RESOLUTION = "768P";
+export const H3_LITE_USD_PER_SEC = 0.04;
+
+export const H3_LITE_UI_LIMITS = {
+  minDurationSec: 4,
+  maxDurationSec: 15,
+  defaultDurationSec: 5,
+  defaultFps: 24,
+  maxFps: 24,
+  defaultWidth: 768,
+  defaultHeight: 768,
+  maxWidth: 768,
+  maxHeight: 768,
+  note: "MiniMax-H3-Lite 768P, pay-as-you-go (~0,04 USD/s). Czas 4–15 s, domyślnie 5 s (~0,20 USD). Obraz startowy to pierwsza klatka. Comfy nie jest wymagane. Klucz MINIMAX_API_KEY (pay-as-you-go, nie pakiet Hailuo).",
+} as const;
+
+/** Czas H3-Lite: liczba całkowita w zakresie API. Brak wartości → 5 s. */
+export function clampH3LiteDuration(value: number | undefined | null): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return H3_LITE_UI_LIMITS.defaultDurationSec;
+  }
+  const rounded = Math.round(value);
+  if (rounded < H3_LITE_UI_LIMITS.minDurationSec) {
+    return H3_LITE_UI_LIMITS.minDurationSec;
+  }
+  if (rounded > H3_LITE_UI_LIMITS.maxDurationSec) {
+    return H3_LITE_UI_LIMITS.maxDurationSec;
+  }
+  return rounded;
+}
+
+export function h3LiteEstimatedUsd(durationSec: number): number {
+  const seconds = clampH3LiteDuration(durationSec);
+  return Math.round(seconds * H3_LITE_USD_PER_SEC * 100) / 100;
+}
+
+/** Silnik chmurowy nie czeka na bramkę zdrowia ComfyUI. */
+export function videoEngineSkipsComfyHealth(
+  engine: string | undefined
+): boolean {
+  return engine === "h3-lite";
+}
+
 export const SVD_UI_LIMITS = {
   maxDurationSec: 8,
   maxWidth: 576,
@@ -240,7 +296,9 @@ export function effectiveDurationSec(frames: number, fps: number): number {
 }
 
 export function isVideoEngine(value: unknown): value is VideoEngineId {
-  return value === "wan" || value === "ltx" || value === "svd";
+  return (
+    value === "wan" || value === "ltx" || value === "svd" || value === "h3-lite"
+  );
 }
 
 export function isChunkedVideoEngine(

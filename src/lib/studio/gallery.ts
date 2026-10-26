@@ -10,6 +10,10 @@ import {
   loadGalleryIndex,
 } from "./gallery-index";
 import { normalizeComfyMediaRef } from "./comfy-media";
+import {
+  fallbackGalleryRoot,
+  resolveFallbackGalleryFile,
+} from "./cloud-gallery";
 import { outputRoot, resolveOutputFile } from "./paths";
 import type { GalleryItem } from "./types";
 
@@ -299,13 +303,15 @@ async function listGalleryFromDisk(options: {
   kind?: "all" | "image" | "video";
   limit?: number;
   offset?: number;
+  /** Inny katalog niż COMFYUI_OUTPUT_DIR (fallback klipów chmurowych). */
+  root?: string;
 }): Promise<{
   items: GalleryItem[];
   configured: boolean;
   error: string | null;
   total?: number;
 }> {
-  const root = outputRoot();
+  const root = options.root ?? outputRoot();
   if (!root) {
     return {
       items: [],
@@ -317,6 +323,9 @@ async function listGalleryFromDisk(options: {
   try {
     await fs.access(root);
   } catch {
+    if (options.root) {
+      return { items: [], configured: false, error: null };
+    }
     return {
       items: [],
       configured: true,
@@ -389,15 +398,36 @@ export async function listGallery(options: {
     return { ...disk, source: "local" };
   }
 
+  const fallback = await listGalleryFromDisk({
+    ...options,
+    limit: 120,
+    offset: 0,
+    root: fallbackGalleryRoot(),
+  });
+
   const comfy = await listGalleryFromComfy(options);
   if (comfy.items.length > 0 || !comfy.error) {
+    const offset = Math.max(0, options.offset ?? 0);
+    const limit = Math.min(options.limit ?? 60, 120);
+    const seen = new Set(comfy.items.map((item) => item.name));
+    const extra =
+      offset === 0
+        ? fallback.items.filter((item) => !seen.has(item.name))
+        : [];
+    const items = [...extra, ...comfy.items]
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .slice(0, limit);
     return {
-      items: comfy.items,
+      items,
       configured: true,
       error: comfy.error,
       source: "comfy",
-      total: comfy.total,
+      total: (comfy.total ?? comfy.items.length) + extra.length,
     };
+  }
+
+  if (fallback.items.length > 0) {
+    return { ...fallback, source: "local", configured: true, error: null };
   }
 
   if (disk.configured) {
@@ -418,14 +448,20 @@ export async function listGallery(options: {
 export async function readGalleryFile(
   relativePath: string
 ): Promise<{ absPath: string; mime: string } | null> {
-  const abs = resolveOutputFile(relativePath);
-  if (!abs) return null;
-  try {
-    const st = await fs.stat(abs);
-    if (!st.isFile()) return null;
-  } catch {
-    return null;
+  const candidates = [
+    resolveOutputFile(relativePath),
+    resolveFallbackGalleryFile(relativePath),
+  ];
+  for (const abs of candidates) {
+    if (!abs) continue;
+    try {
+      const st = await fs.stat(abs);
+      if (!st.isFile()) continue;
+      const ext = path.extname(abs).toLowerCase();
+      return { absPath: abs, mime: mimeFor(ext) };
+    } catch {
+      // następny katalog
+    }
   }
-  const ext = path.extname(abs).toLowerCase();
-  return { absPath: abs, mime: mimeFor(ext) };
+  return null;
 }

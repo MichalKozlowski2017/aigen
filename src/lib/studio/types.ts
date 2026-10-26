@@ -84,6 +84,8 @@ export type StudioPublicConfig = {
   modelsDir: string | null;
   outputDir: string | null;
   passwordRequired: boolean;
+  /** true gdy MINIMAX_API_KEY jest ustawione. Wartości klucza nie zwracamy. */
+  minimaxApiKeyConfigured: boolean;
   defaultCheckpoint: string;
   /** Domyślny model w UI Obraz (`flux` albo nazwa checkpointu). */
   defaultImageModel: string;

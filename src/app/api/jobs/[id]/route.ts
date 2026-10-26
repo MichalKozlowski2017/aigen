@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 import { requireStudioApiAuth } from "@/lib/studio/api-auth";
 import { getJobStatus } from "@/lib/studio/comfy-client";
 import { recordGalleryOutputs } from "@/lib/studio/gallery-index";
+import {
+  MinimaxConfigError,
+  getMinimaxJob,
+  parseMinimaxPromptId,
+} from "@/lib/studio/minimax-video";
 
 export const dynamic = "force-dynamic";
+/** Pobranie MP4 H3-Lite może zająć chwilę po statusie succeeded. */
+export const maxDuration = 120;
 
 export async function GET(
   _request: Request,
@@ -15,6 +22,24 @@ export async function GET(
   const { id } = await context.params;
   if (!id) {
     return NextResponse.json({ ok: false, error: "Brak id" }, { status: 400 });
+  }
+
+  if (parseMinimaxPromptId(id)) {
+    try {
+      const job = await getMinimaxJob(id);
+      if (!job) {
+        return NextResponse.json(
+          { ok: false, error: "Nieznane zadanie MiniMax" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ ok: true, job });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Status MiniMax nieudany";
+      const status = err instanceof MinimaxConfigError ? 503 : 502;
+      return NextResponse.json({ ok: false, error: message }, { status });
+    }
   }
 
   try {
