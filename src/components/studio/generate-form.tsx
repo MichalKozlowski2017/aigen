@@ -30,14 +30,16 @@ import {
 import type { GalleryItem } from "@/lib/studio/types";
 import {
   DEFAULT_VIDEO_ENGINE,
-  H3_LITE_UI_LIMITS,
   LTX_UI_LIMITS,
   MINIMAX_API_KEY_ENV,
-  MINIMAX_H3_LITE_MODEL,
   SVD_UI_LIMITS,
   VIDEO_ENGINE_OPTIONS,
-  clampH3LiteDuration,
-  h3LiteEstimatedUsd,
+  clampMinimaxDuration,
+  formatUsdPerSec,
+  getMinimaxEngine,
+  isMinimaxVideoEngine,
+  minimaxEstimatedUsd,
+  minimaxUiLimits,
   DEFAULT_WAN_FAST_STEPS,
   DEFAULT_WAN_QUALITY_PRESET,
   VIDEO_ORIENTATION_LAST_KEY,
@@ -55,8 +57,8 @@ import {
   isChunkedVideoEngine,
   parseVideoOrientationMode,
   parseVideoOrientationResolved,
-  planH3LiteVideo,
   planLtxVideo,
+  planMinimaxVideo,
   planSvdVideo,
   planWanVideo,
   resolveVideoOrientation,
@@ -125,7 +127,7 @@ type JobOutput = {
   filename: string;
   subfolder: string;
   type: string;
-  /** Dysk galerii (H3-Lite). Bez tego podgląd idzie przez Comfy /view. */
+  /** Dysk galerii (MiniMax). Bez tego podgląd idzie przez Comfy /view. */
   url?: string;
 };
 
@@ -210,13 +212,16 @@ export function GenerateForm({
     width: number;
     height: number;
   } | null>(null);
+  const minimaxEngine = isMinimaxVideoEngine(videoEngine)
+    ? getMinimaxEngine(videoEngine)
+    : null;
   const videoLimits =
     videoEngine === "wan"
       ? WAN_UI_LIMITS
       : videoEngine === "ltx"
         ? LTX_UI_LIMITS
-        : videoEngine === "h3-lite"
-          ? H3_LITE_UI_LIMITS
+        : minimaxEngine
+          ? minimaxUiLimits(minimaxEngine.id)
           : SVD_UI_LIMITS;
   const [width, setWidth] = useState<number>(() => {
     if (kind !== "video") return getImageFormatPreset("square").width;
@@ -414,8 +419,11 @@ export function GenerateForm({
           )
         : videoEngine === "ltx"
           ? planLtxVideo({ width, height, fps, durationSec })
-          : videoEngine === "h3-lite"
-            ? planH3LiteVideo({ durationSec })
+          : minimaxEngine
+            ? planMinimaxVideo({
+                videoEngine: minimaxEngine.id,
+                durationSec,
+              })
             : planSvdVideo({ width, height, fps, durationSec })
       : null;
   const videoRisky = Boolean(videoPlan?.vramRisky);
@@ -505,9 +513,17 @@ export function GenerateForm({
       if (!model.toLowerCase().includes("ltx")) {
         setModel(DEFAULT_LTX_CHECKPOINT);
       }
-    } else if (next === "h3-lite") {
-      setDurationSec(H3_LITE_UI_LIMITS.defaultDurationSec);
-      setFps(H3_LITE_UI_LIMITS.defaultFps);
+    } else if (isMinimaxVideoEngine(next)) {
+      const spec = getMinimaxEngine(next);
+      setDurationSec(
+        clampMinimaxDuration(
+          next,
+          isMinimaxVideoEngine(videoEngine)
+            ? durationSec
+            : spec.defaultDurationSec
+        )
+      );
+      setFps(spec.defaultFps);
       setPostRife(false);
       setPostUpscale(false);
       setFaceRestore(false);
@@ -526,7 +542,7 @@ export function GenerateForm({
         "svd_xt.safetensors";
       setModel(svd);
     }
-    if (next !== "h3-lite" && startFileRef.current && !startImageSource) {
+    if (!isMinimaxVideoEngine(next) && startFileRef.current && !startImageSource) {
       void uploadStartFile(startFileRef.current, startImageDims, "comfy");
     }
   }
@@ -863,7 +879,7 @@ export function GenerateForm({
     mode: "auto" | "local" | "comfy" = "auto"
   ) {
     const local =
-      mode === "local" || (mode === "auto" && videoEngine === "h3-lite");
+      mode === "local" || (mode === "auto" && minimaxEngine);
     setError(null);
     setErrorDetail(null);
     setUploadBusy(true);
@@ -874,7 +890,7 @@ export function GenerateForm({
         const dataUrl = await fileToDataUrl(file);
         if (dataUrl.length > 7_500_000) {
           setError(
-            "Obraz jest za duży na żądanie H3-Lite. Wybierz mniejsze zdjęcie."
+            "Obraz jest za duży na żądanie MiniMax. Wybierz mniejsze zdjęcie."
           );
           setStartImage("");
           setStartImageDataUrl(null);
@@ -1084,11 +1100,11 @@ export function GenerateForm({
     if (
       kind === "video" &&
       !startImage.trim() &&
-      !(videoEngine === "h3-lite" && startImageDataUrl)
+      !(minimaxEngine && startImageDataUrl)
     ) {
       setError(
-        videoEngine === "h3-lite"
-          ? "Dodaj obraz startowy — H3-Lite jest tylko image-to-video."
+        minimaxEngine
+          ? "Dodaj obraz startowy — MiniMax jest tylko image-to-video."
           : "Dodaj obraz startowy (upload powyżej) albo wpisz nazwę pliku w Comfy input."
       );
       setStatus(null);
@@ -1098,19 +1114,19 @@ export function GenerateForm({
 
     startTransition(async () => {
       try {
-        if (!(kind === "video" && videoEngine === "h3-lite")) {
+        if (!(kind === "video" && minimaxEngine)) {
           await maybeFreeOnEngineSwitch();
         }
 
-        if (kind === "video" && videoEngine === "h3-lite") {
-          const duration = clampH3LiteDuration(durationSec);
+        if (kind === "video" && minimaxEngine) {
+          const duration = clampMinimaxDuration(minimaxEngine.id, durationSec);
           const res = await fetch("/api/generate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               kind: "video",
               prompt,
-              videoEngine: "h3-lite",
+              videoEngine: minimaxEngine.id,
               durationSec: duration,
               startImage: startImage.trim() || "start.jpg",
               ...(startImageDataUrl
@@ -1141,7 +1157,7 @@ export function GenerateForm({
             stage: "queued",
             step: null,
             stepMax: null,
-            phase: "Zadanie MiniMax-H3-Lite wysłane — odpytuję do gotowego MP4",
+            phase: `Zadanie ${minimaxEngine.model} wysłane — odpytuję do gotowego MP4`,
             queuePending: 0,
             queueRunning: false,
             currentNodeId: null,
@@ -1423,7 +1439,34 @@ export function GenerateForm({
                 Silnik wideo
               </legend>
               <div className="flex flex-wrap gap-2">
-                {VIDEO_ENGINE_OPTIONS.map((opt) => (
+                {VIDEO_ENGINE_OPTIONS.filter(
+                  (opt) => !isMinimaxVideoEngine(opt.id)
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => applyVideoEngine(opt.id)}
+                    className={[
+                      "rounded-lg border px-3 py-2 text-left text-sm transition",
+                      videoEngine === opt.id
+                        ? "border-teal-400/50 bg-teal-400/10 text-teal-50"
+                        : "border-studio-border bg-studio-surface text-stone-300 hover:border-studio-border-strong",
+                    ].join(" ")}
+                  >
+                    <span className="block font-medium">{opt.label}</span>
+                    <span className="mt-0.5 block text-[11px] text-stone-500">
+                      {opt.blurb}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <p className="pt-1 text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
+                MiniMax (chmura)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {VIDEO_ENGINE_OPTIONS.filter((opt) =>
+                  isMinimaxVideoEngine(opt.id)
+                ).map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
@@ -1459,16 +1502,20 @@ export function GenerateForm({
                   720p = bez LoRA. 24 fps: preferuj Smooth 24 (RIFE); Native 24 =
                   experimental.
                 </p>
-              ) : videoEngine === "h3-lite" ? (
+              ) : minimaxEngine ? (
                 <p className="rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-2 text-[12px] leading-relaxed text-teal-100/85">
                   <span className="font-medium text-teal-50">
-                    {MINIMAX_H3_LITE_MODEL}
+                    {minimaxEngine.model}
                   </span>{" "}
-                  · 768P · 24 fps po stronie modelu ·{" "}
-                  {H3_LITE_UI_LIMITS.minDurationSec}–
-                  {H3_LITE_UI_LIMITS.maxDurationSec} s · domyślnie{" "}
-                  {H3_LITE_UI_LIMITS.defaultDurationSec} s (~
-                  {h3LiteEstimatedUsd(H3_LITE_UI_LIMITS.defaultDurationSec).toFixed(2)}{" "}
+                  · {minimaxEngine.resolution} ·{" "}
+                  {formatUsdPerSec(minimaxEngine.usdPerSec)} USD/s · 24 fps po
+                  stronie modelu · {minimaxEngine.minDurationSec}–
+                  {minimaxEngine.maxDurationSec} s · domyślnie{" "}
+                  {minimaxEngine.defaultDurationSec} s (~
+                  {minimaxEstimatedUsd(
+                    minimaxEngine.id,
+                    minimaxEngine.defaultDurationSec
+                  ).toFixed(2)}{" "}
                   USD). Obraz startowy idzie jako pierwsza klatka. Comfy nie jest
                   wymagane. Klucz serwera:{" "}
                   <code className="text-teal-50">{MINIMAX_API_KEY_ENV}</code>{" "}
@@ -1583,7 +1630,7 @@ export function GenerateForm({
               </fieldset>
             ) : null}
 
-            {videoEngine !== "h3-lite" ? (
+            {!minimaxEngine ? (
             <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-studio-border bg-studio-surface px-3 py-2.5">
               <input
                 type="checkbox"
@@ -1777,7 +1824,7 @@ export function GenerateForm({
                 <div className="min-w-0 space-y-1">
                   <p className="text-sm text-stone-200">
                     {uploadBusy
-                      ? videoEngine === "h3-lite"
+                      ? minimaxEngine
                         ? "Przygotowuję obraz startowy…"
                         : "Wgrywam do ComfyUI…"
                       : startImage
@@ -1906,7 +1953,7 @@ export function GenerateForm({
         </div>
 
         {(kind === "image" && !fluxSelected) ||
-        (kind === "video" && videoEngine !== "h3-lite") ? (
+        (kind === "video" && !minimaxEngine) ? (
           <div>
             <label className="mb-1.5 block text-xs font-medium uppercase tracking-[0.16em] text-stone-500">
               Negatyw
@@ -1932,10 +1979,11 @@ export function GenerateForm({
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {videoEngine === "h3-lite" ? (
+          {minimaxEngine ? (
             <Field label="Model">
               <p className="rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm text-stone-200">
-                {MINIMAX_H3_LITE_MODEL} · 768P
+                {minimaxEngine.model} · {minimaxEngine.resolution} ·{" "}
+                {formatUsdPerSec(minimaxEngine.usdPerSec)} USD/s
               </p>
             </Field>
           ) : (
@@ -1963,7 +2011,7 @@ export function GenerateForm({
             </select>
           </Field>
           )}
-          {videoEngine === "h3-lite" ? null : (
+          {minimaxEngine ? null : (
           <Field label="Seed (−1 = losowy)">
             <input
               type="number"
@@ -2008,7 +2056,7 @@ export function GenerateForm({
               </div>
             </fieldset>
           ) : null}
-          {videoEngine === "h3-lite" ? null : (
+          {minimaxEngine ? null : (
           <>
           <Field
             label={
@@ -2089,36 +2137,37 @@ export function GenerateForm({
             <>
               <Field
                 label={
-                  videoEngine === "h3-lite"
-                    ? `Czas (s, ${H3_LITE_UI_LIMITS.minDurationSec}–${H3_LITE_UI_LIMITS.maxDurationSec})`
+                  minimaxEngine
+                    ? `Czas (s, ${minimaxEngine.minDurationSec}–${minimaxEngine.maxDurationSec})`
                     : `Czas zadany (s, max ${durationInputMax} @ ${fps} FPS)`
                 }
               >
                 <input
                   type="number"
                   min={
-                    videoEngine === "h3-lite"
-                      ? H3_LITE_UI_LIMITS.minDurationSec
+                    minimaxEngine
+                      ? minimaxEngine.minDurationSec
                       : 1
                   }
                   max={durationInputMax}
-                  step={videoEngine === "h3-lite" ? 1 : 0.5}
+                  step={minimaxEngine ? 1 : 0.5}
                   value={durationSec}
                   onChange={(e) => {
                     const next = Number(e.target.value);
                     setDurationSec(
-                      videoEngine === "h3-lite"
-                        ? clampH3LiteDuration(next)
+                      minimaxEngine
+                        ? clampMinimaxDuration(minimaxEngine.id, next)
                         : Math.min(next, durationInputMax)
                     );
                   }}
                   className="w-full rounded-lg border border-studio-border bg-studio-surface px-3 py-2 text-sm"
                 />
               </Field>
-              {videoEngine === "h3-lite" ? (
+              {minimaxEngine ? (
                 <p className="text-[11px] text-stone-500 sm:col-span-2">
-                  Szacunek ~{h3LiteEstimatedUsd(durationSec).toFixed(2)} USD
-                  (0,04 USD/s, 768P). Negatyw, steps, CFG, RIFE i upscale nie
+                  Szacunek ~{minimaxEstimatedUsd(minimaxEngine.id, durationSec).toFixed(2)} USD
+                  ({formatUsdPerSec(minimaxEngine.usdPerSec)} USD/s,{" "}
+                  {minimaxEngine.resolution}). Negatyw, steps, CFG, RIFE i upscale nie
                   idą do API.
                 </p>
               ) : null}
@@ -2139,7 +2188,7 @@ export function GenerateForm({
                     ))}
                   </select>
                 </Field>
-              ) : videoEngine === "h3-lite" ? null : (
+              ) : minimaxEngine ? null : (
                 <Field label={`FPS (max ${videoLimits.maxFps})`}>
                   <input
                     type="number"
@@ -2187,14 +2236,19 @@ export function GenerateForm({
 
         {kind === "video" && videoPlan ? (
           <div className="space-y-1.5 text-sm">
-            {videoEngine === "h3-lite" ? (
+            {minimaxEngine ? (
               <p className="text-stone-200">
                 Jedno wywołanie{" "}
                 <span className="font-mono text-teal-100">
                   {videoPlan.effectiveDurationSec}s
                 </span>{" "}
-                · {MINIMAX_H3_LITE_MODEL} · 768P · ~
-                {h3LiteEstimatedUsd(videoPlan.effectiveDurationSec).toFixed(2)} USD.
+                · {minimaxEngine.model} · {minimaxEngine.resolution} ·{" "}
+                {formatUsdPerSec(minimaxEngine.usdPerSec)} USD/s · ~
+                {minimaxEstimatedUsd(
+                  minimaxEngine.id,
+                  videoPlan.effectiveDurationSec
+                ).toFixed(2)}{" "}
+                USD.
                 Obraz wyznacza kadr. MP4 jest ściągany do galerii, zanim link wygaśnie.
               </p>
             ) : (
@@ -2226,7 +2280,7 @@ export function GenerateForm({
               ) : null}
             </p>
             )}
-            {videoPlan.durationClamped && videoEngine !== "h3-lite" ? (
+            {videoPlan.durationClamped && !minimaxEngine ? (
               <p className="text-amber-200/85">
                 Zadany czas przekracza max{" "}
                 {isChunkedVideoEngine(videoEngine)
@@ -2252,12 +2306,12 @@ export function GenerateForm({
               <p className="text-stone-500">{videoLimitsNote}</p>
             ) : null}
             <p className="text-stone-500">
-              {videoEngine === "h3-lite" ? (
+              {minimaxEngine ? (
                 <>
                   Obraz startowy jest pierwszą klatką (pole{" "}
                   <code className="text-stone-400">image_url</code> /{" "}
                   <code className="text-stone-400">first_frame</code>
-                  ). {H3_LITE_UI_LIMITS.note}
+                  ). {minimaxUiLimits(minimaxEngine.id).note}
                 </>
               ) : (
                 <>
@@ -2392,8 +2446,8 @@ export function GenerateForm({
             />
           ) : (
             <p className="text-sm text-stone-500">
-              {videoEngine === "h3-lite"
-                ? "Wynik H3-Lite pojawi się tutaj. Klip jest zapisywany w galerii, nie jako sam zdalny link."
+              {minimaxEngine
+                ? "Wynik MiniMax pojawi się tutaj. Klip jest zapisywany w galerii, nie jako sam zdalny link."
                 : "Wynik pojawi się tutaj po zakończeniu joba w ComfyUI."}
             </p>
           )}
@@ -2437,7 +2491,7 @@ export function GenerateForm({
           {status === "completed" && outputs.length > 0 ? (
             <div className="mt-4 space-y-2 rounded-lg border border-teal-400/20 bg-teal-400/5 px-3 py-3">
               <p className="text-sm text-teal-100/90">
-                {videoEngine === "h3-lite"
+                {minimaxEngine
                   ? "MP4 jest w galerii (ściągnięty, zanim link MiniMax wygaśnie)."
                   : "Zapisane w output ComfyUI — widać je w Galerii (historia / katalog output)."}
               </p>

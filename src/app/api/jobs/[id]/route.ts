@@ -9,7 +9,7 @@ import {
 } from "@/lib/studio/minimax-video";
 
 export const dynamic = "force-dynamic";
-/** Pobranie MP4 H3-Lite może zająć chwilę po statusie succeeded. */
+/** Pobranie MP4 MiniMax może zająć chwilę po statusie succeeded. */
 export const maxDuration = 120;
 
 export async function GET(

@@ -40,8 +40,8 @@ export default async function StudioSettingsPage() {
     {
       label: "MINIMAX_API_KEY",
       value: config.minimaxApiKeyConfigured
-        ? "ustawione (ukryte) — MiniMax-H3-Lite, pay-as-you-go"
-        : "brak — H3-Lite nie wystartuje",
+        ? "ustawione (ukryte) — MiniMax H3, pay-as-you-go"
+        : "brak — silniki MiniMax nie wystartują",
     },
     {
       label: "Domyślny model obrazu",

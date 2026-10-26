@@ -65,7 +65,7 @@ STUDIO_PASSWORD=...
 - **Autostart Legion:** `scripts/legion/start-comfy-stack.ps1` (Comfy + Quick Tunnel + queue worker). Bez domeny: `AIGEN_PANEL_URL` + `COMFY_URL_UPDATE_SECRET` → auto `publish-comfy-url.ps1`. Opcjonalnie `install-startup-shortcut.ps1`. Szczegóły: `scripts/legion/README.md`.
 - **Named Tunnel / Quick auto-sync:** [docs/named-cloudflare-tunnel.md](named-cloudflare-tunnel.md).
 - `COMFYUI_MODELS_DIR` / `COMFYUI_OUTPUT_DIR` — wyłącznie gdy panel Next.js działa na maszynie z Comfy (lokalne pobieranie wag / skan katalogu).
-- `MINIMAX_API_KEY` — klucz **pay-as-you-go** z [platform.minimax.io](https://platform.minimax.io) dla silnika **MiniMax-H3-Lite** (768P, ok. 0,04 USD/s). Pakiety wideo Hailuo i klucze subskrypcji tego modelu nie obsługują. Panel nie zapisuje klucza w repozytorium. H3-Lite nie wymaga działającego ComfyUI; Wan / LTX / SVD zostają na Comfy.
+- `MINIMAX_API_KEY` — klucz **pay-as-you-go** z [platform.minimax.io](https://platform.minimax.io) dla obraz → wideo H3 (H3 768P i 2K, Highspeed 768P, Lite 768P i 480P, Max 768P i 480P). Pakiety wideo Hailuo i klucze subskrypcji tych modeli nie obsługują. Panel nie zapisuje klucza w repozytorium. MiniMax nie wymaga działającego ComfyUI; Wan / LTX / SVD zostają na Comfy.
 - **Pipeline:** patrz §6 — awaited `after()` + GET advance + durable JSON; flaga Legion opcjonalna/eksperymentalna.
 
 ## 3. Uruchomienie razem

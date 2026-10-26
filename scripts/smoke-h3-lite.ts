@@ -4,18 +4,26 @@
  *   npx --yes tsx scripts/smoke-h3-lite.ts
  */
 import { generateBodySchema } from "../src/lib/studio/schemas";
-import { buildH3LiteCreateBody } from "../src/lib/studio/minimax-video";
+import {
+  buildH3LiteCreateBody,
+  buildMinimaxCreateBody,
+} from "../src/lib/studio/minimax-video";
 import {
   H3_LITE_RESOLUTION,
   H3_LITE_UI_LIMITS,
   MINIMAX_API_KEY_ENV,
   MINIMAX_H3_LITE_MODEL,
+  MINIMAX_VIDEO_ENGINES,
   VIDEO_ENGINE_OPTIONS,
   clampH3LiteDuration,
+  clampMinimaxDuration,
+  formatUsdPerSec,
   h3LiteEstimatedUsd,
   isChunkedVideoEngine,
+  isMinimaxVideoEngine,
   isVideoEngine,
   videoEngineSkipsComfyHealth,
+  type MinimaxVideoEngineId,
 } from "../src/lib/studio/video-engines";
 import {
   buildWorkflow,
@@ -85,7 +93,91 @@ assert(
     prompt: "x",
     videoEngine: "hailuo",
   }).success,
-  "schema rejects other minimax products"
+  "schema rejects hailuo (not on v2 create)"
+);
+assert(
+  !generateBodySchema.safeParse({
+    kind: "video",
+    prompt: "x",
+    videoEngine: "h3-regen",
+  }).success,
+  "schema rejects regeneration"
+);
+
+const expected: Array<{
+  id: MinimaxVideoEngineId;
+  model: string;
+  resolution: string;
+  usdPerSec: number;
+  minDurationSec: number;
+}> = [
+  { id: "h3-768p", model: "MiniMax-H3", resolution: "768P", usdPerSec: 0.08, minDurationSec: 4 },
+  { id: "h3-2k", model: "MiniMax-H3", resolution: "2K", usdPerSec: 0.13, minDurationSec: 4 },
+  { id: "h3-highspeed", model: "MiniMax-H3-Highspeed", resolution: "768P", usdPerSec: 0.06, minDurationSec: 4 },
+  { id: "h3-lite", model: "MiniMax-H3-Lite", resolution: "768P", usdPerSec: 0.04, minDurationSec: 4 },
+  { id: "h3-lite-480p", model: "MiniMax-H3-Lite", resolution: "480P", usdPerSec: 0.025, minDurationSec: 4 },
+  { id: "h3-max", model: "MiniMax-H3-Max", resolution: "768P", usdPerSec: 0.08, minDurationSec: 5 },
+  { id: "h3-max-480p", model: "MiniMax-H3-Max", resolution: "480P", usdPerSec: 0.05, minDurationSec: 5 },
+];
+assert(MINIMAX_VIDEO_ENGINES.length === expected.length, "seven MiniMax choices");
+assert(
+  MINIMAX_VIDEO_ENGINES.filter((spec) => spec.id === "h3-lite").length === 1,
+  "h3-lite stays one choice"
+);
+const models = new Set(MINIMAX_VIDEO_ENGINES.map((spec) => spec.model));
+assert(
+  models.size === 4 &&
+    models.has("MiniMax-H3") &&
+    models.has("MiniMax-H3-Highspeed") &&
+    models.has("MiniMax-H3-Lite") &&
+    models.has("MiniMax-H3-Max"),
+  "v2 create model enum only"
+);
+for (const row of expected) {
+  const spec = MINIMAX_VIDEO_ENGINES.find((item) => item.id === row.id);
+  assert(spec, `missing ${row.id}`);
+  assert(spec.model === row.model, `${row.id} model`);
+  assert(spec.resolution === row.resolution, `${row.id} resolution`);
+  assert(spec.usdPerSec === row.usdPerSec, `${row.id} usd/s`);
+  assert(spec.minDurationSec === row.minDurationSec, `${row.id} min duration`);
+  assert(isVideoEngine(row.id) && isMinimaxVideoEngine(row.id), `${row.id} engine`);
+  assert(!isChunkedVideoEngine(row.id), `${row.id} not chunked`);
+  assert(videoEngineSkipsComfyHealth(row.id), `${row.id} skips Comfy`);
+  const option = VIDEO_ENGINE_OPTIONS.find((opt) => opt.id === row.id);
+  assert(option, `${row.id} is a form choice`);
+  assert(
+    option.label.includes(`${formatUsdPerSec(row.usdPerSec)} USD/s`),
+    `${row.id} shows USD/s`
+  );
+  const created = buildMinimaxCreateBody({
+    engine: row.id,
+    prompt: "she turns her head",
+    imageUrl: "data:image/jpeg;base64,aaaa",
+    durationSec: 4,
+  });
+  assert(created.model === row.model, `${row.id} create model`);
+  assert(created.resolution === row.resolution, `${row.id} create resolution`);
+  assert(created.duration === row.minDurationSec, `${row.id} duration floor`);
+  assert(!("ratio" in created), `${row.id} omits ratio`);
+  const parsedEngine = generateBodySchema.safeParse({
+    kind: "video",
+    prompt: "x",
+    videoEngine: row.id,
+    durationSec: 5,
+    startImage: "start.jpg",
+  });
+  assert(parsedEngine.success, `schema accepts ${row.id}`);
+  const planned = planVideo({ videoEngine: row.id, durationSec: 4 });
+  assert(planned.engine === row.id, `${row.id} plan engine`);
+  assert(planned.durationSec === row.minDurationSec, `${row.id} plan floor`);
+  assert(!planned.chunkPlan && planned.vramRisky === false, `${row.id} no chunks`);
+}
+assert(clampMinimaxDuration("h3-max", 4) === 5, "H3-Max rejects 4s");
+assert(clampMinimaxDuration("h3-lite", 4) === 4, "Lite still allows 4s");
+assert(!isMinimaxVideoEngine("MiniMax-Hailuo-2.3"), "hailuo model id is not an engine");
+assert(
+  !MINIMAX_VIDEO_ENGINES.some((spec) => spec.model.includes("Hailuo")),
+  "catalog has no Hailuo"
 );
 
 const body = buildH3LiteCreateBody({
@@ -131,7 +223,18 @@ async function main(): Promise<void> {
     threw = err instanceof Error && /ComfyUI/.test(err.message);
   }
   assert(threw, "buildWorkflow refuses h3-lite");
-  console.log("OK  h3-lite engine selection, duration, create body, Comfy gate");
+  let refusedMax = false;
+  try {
+    await buildWorkflow({
+      ...wanBody,
+      videoEngine: "h3-2k",
+      prompt: "cloud",
+    });
+  } catch (err) {
+    refusedMax = err instanceof Error && /ComfyUI/.test(err.message);
+  }
+  assert(refusedMax, "buildWorkflow refuses h3-2k");
+  console.log("OK  minimax engines, h3-lite 768P, duration, create body, Comfy gate");
 }
 
 void main();
